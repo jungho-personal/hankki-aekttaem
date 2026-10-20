@@ -89,7 +89,7 @@ GEMINI_API_KEY=발급받은키 .venv/bin/uvicorn app.main:app --reload
 | 변수 | 필수 | 설명 |
 |---|---|---|
 | `GEMINI_API_KEY` | X | 없으면 fallback 모드 |
-| `GEMINI_MODEL` | X | 모델명. 비우면 `gemini-3.5-flash-lite` (2026-10-20 확정. 실제 호출은 키 설정 후 확인 필요) |
+| `GEMINI_MODEL` | X | 모델명. 비우면 `gemini-3.5-flash-lite` |
 | `GEMINI_TIMEOUT_SEC` | X | Gemini 호출 타임아웃(초), 기본 15. 넘으면 fallback |
 | `OFFERING_DEMO` | X | `true`면 결과 아래 공양 슬롯에 **시연용 예시 광고**를 `[광고 예시]` 표기로 노출. 비우면 실제 광고주(`app/data/offerings.py`의 `SPONSORS`)만 노출 (현재 없음 → `offering: null`) |
 | `PORT` | Railway가 주입 | 직접 설정하지 않음 |
@@ -97,11 +97,11 @@ GEMINI_API_KEY=발급받은키 .venv/bin/uvicorn app.main:app --reload
 ## 5. Railway 배포 체크리스트
 
 설정 파일
-- `railpack.json`: 시작 명령. **없으면 빌드 실패해** (Railpack은 `app/main.py` 구조를 FastAPI로 자동 인식 못 함. `railway.json`의 startCommand는 빌드 준비 단계에서 안 읽힘. 2026-10-20 실제 배포에서 확인)
+- `railpack.json`: 시작 명령. **이 파일이 있어야 빌드돼** (Railpack은 `app/main.py` 구조를 FastAPI로 자동 인식하지 못하고, `railway.json`의 startCommand는 빌드 준비 단계에서 읽지 않음)
 - `railway.json`: 헬스체크 `/api/health`, 재시작 정책
 - `.python-version` (3.10), `requirements.txt`
 
-### 현재 배포 (2026-10-20)
+### 현재 배포
 - URL: https://hankki-web-production.up.railway.app
 - Railway 프로젝트 `hankki-aekttaem` / 서비스 `hankki-web` / 환경 `production`
 - **GitHub `main`에 push하면 자동 재배포돼** (서비스 Source = `jungho-personal/hankki-aekttaem`, branch `main`)
@@ -130,15 +130,18 @@ railway domain
 3. 배포 로그에서 `Uvicorn running on http://0.0.0.0:xxxx` 확인
 4. `https://<도메인>/api/health` → `{"status":"ok","llm_enabled":false,...}` 확인
 
-### 워크숍 당일
-1. Google AI Studio에서 API 키 발급
-2. Railway Variables에 `GEMINI_API_KEY`(필요하면 `GEMINI_MODEL`도) 추가. 변수를 바꾸면 자동으로 재배포돼
-3. `/api/health`에서 `llm_enabled: true` 확인
-4. 실제 요청을 보내 `is_fallback: false`인지 확인. `true`면 Railway 로그에서 `LLM 실패 → fallback 사용` 사유를 확인
-5. 프론트 교체: `static/index.html` 수정 → push(또는 `railway up`) → 재배포
+- 현재 Variables: `GEMINI_API_KEY`(설정됨), `OFFERING_DEMO=true`
+
+### 운영 확인
+- `/api/health`에서 `llm_enabled: true` 확인
+- 실제 요청에서 `is_fallback: false` 확인. `true`면 Railway 로그에서 `LLM 실패 → fallback 사용` 사유 확인
+- Railway 대시보드에서 변수를 바꾸면 "Apply changes"(또는 Deploy)를 눌러야 적용돼
+
+### 프론트 교체
+- `static/index.html` 수정 → `git push` → 자동 재배포 (`WORKSHOP_PROMPT.md` 참고)
 
 ### 주의
-- 캐시는 인메모리라 **재배포하면 초기화**돼. 그래서 같은 날 결과가 한 번 바뀔 수 있어
+- 캐시는 인메모리라 **재배포·변수 변경 시 초기화**돼. 그래서 같은 날 결과가 한 번 바뀔 수 있어. 시연 직전에는 push/변수 변경을 피해
 - 레플리카는 1개로 유지해. 여러 개면 인스턴스마다 결과가 다를 수 있어
 - API 키는 Railway Variables에만 둬. 코드, 프론트, GitHub에는 절대 넣지 마
 
