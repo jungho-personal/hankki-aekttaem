@@ -16,7 +16,8 @@ from typing import Optional
 
 from app.data.offerings import DEMO_SPONSORS, FALLBACK_COMMENTS, SPONSORS
 from app.schemas import BapgwaeContext, Offering, OfferingSlot
-from app.services.fallback import pick, seed_of
+from app.services.candidates import seed_of
+from app.services.fallback import pick
 from app.services.text_util import josa
 
 # 시연용 예시 광고 표기 (실제 광고로 오인되지 않게 고정)
@@ -40,7 +41,7 @@ def build_disclosure(sponsor_name: str, is_demo: bool) -> str:
 
 def select_offering_slot(ctx: BapgwaeContext) -> Optional[OfferingSlot]:
     """
-    끼니에 맞는 광고 1개를 고른다. 같은 (일간, 날짜, 끼니)면 항상 같은 광고 (결정적 선택).
+    끼니에 맞는 광고 1개를 고른다. 같은 (일간, 버킷, 날짜, 끼니)면 항상 같은 광고 (결정적 선택).
     """
     # 1) 실제 광고주 우선
     candidates = [s for s in SPONSORS if ctx.meal in s["meals"]]

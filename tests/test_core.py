@@ -1,7 +1,7 @@
 """
 단위 테스트 (핸드오프 12-2장 5단계 목록)
 - 오행 판정, 처방 타입, 끼니 경계(야식 자정 넘김), UTC→KST 날짜 변환, 음력/윤달 변환, 캐시 키/만료
-- fallback 결정성, LLM 응답 파싱
+- 메뉴 풀/후보 선택, fallback 결정성, LLM 응답 파싱
 
 실행: .venv/bin/python -m pytest -v
 """
@@ -11,7 +11,15 @@ import pytest
 
 from app.schemas import BapgwaeContext
 from app.services import llm
+from app.data.menu_pool import MENU_POOL
 from app.services.cache import ResultCache, make_key
+from app.services.candidates import (
+    CANDIDATE_COUNT,
+    PERSON_BUCKETS,
+    avoid_candidates,
+    menu_candidates,
+    person_bucket,
+)
 from app.services.fallback import build_fallback_result
 from app.services.manseryeok import InvalidDateError, get_iljin, get_ilgan, lunar_to_solar
 from app.services.ohaeng import (
@@ -164,11 +172,11 @@ class TestManseryeok:
 # ===================== 캐시 키/만료 =====================
 class TestCache:
     def test_key(self):
-        assert make_key("병", date(2026, 10, 20), "lunch") == ("병", date(2026, 10, 20), "lunch")
+        assert make_key("병", 1, date(2026, 10, 20), "lunch") == ("병", 1, date(2026, 10, 20), "lunch")
 
     def test_hit_before_midnight_and_expire_at_midnight(self):
         cache = ResultCache()
-        key = make_key("병", date(2026, 10, 20), "lunch")
+        key = make_key("병", 0, date(2026, 10, 20), "lunch")
         cache.set_if_absent(key, "A", kst(2026, 10, 20, 12, 0))
         assert cache.get(key, kst(2026, 10, 20, 23, 59)) == "A"   # 자정 전 → 유지
         assert cache.get(key, kst(2026, 10, 21, 0, 0)) is None    # KST 자정 → 만료
@@ -177,7 +185,7 @@ class TestCache:
     def test_expire_uses_kst_not_utc(self):
         """UTC 15:00 = KST 자정 → 만료"""
         cache = ResultCache()
-        key = make_key("병", date(2026, 10, 20), "lunch")
+        key = make_key("병", 0, date(2026, 10, 20), "lunch")
         cache.set_if_absent(key, "A", kst(2026, 10, 20, 12, 0))
         assert cache.get(key, datetime(2026, 10, 20, 14, 59, tzinfo=UTC)) == "A"
         assert cache.get(key, datetime(2026, 10, 20, 15, 0, tzinfo=UTC)) is None
@@ -185,7 +193,7 @@ class TestCache:
     def test_set_if_absent_keeps_first(self):
         """동시 요청 대비: 먼저 저장된 값 유지"""
         cache = ResultCache()
-        key = make_key("병", date(2026, 10, 20), "lunch")
+        key = make_key("병", 0, date(2026, 10, 20), "lunch")
         now = kst(2026, 10, 20, 12, 0)
         assert cache.set_if_absent(key, "A", now) == "A"
         assert cache.set_if_absent(key, "B", now) == "A"
@@ -194,9 +202,10 @@ class TestCache:
     def test_different_keys_independent(self):
         cache = ResultCache()
         now = kst(2026, 10, 20, 12, 0)
-        cache.set_if_absent(make_key("병", date(2026, 10, 20), "lunch"), "A", now)
-        assert cache.get(make_key("병", date(2026, 10, 20), "dinner"), now) is None
-        assert cache.get(make_key("정", date(2026, 10, 20), "lunch"), now) is None
+        cache.set_if_absent(make_key("병", 0, date(2026, 10, 20), "lunch"), "A", now)
+        assert cache.get(make_key("병", 0, date(2026, 10, 20), "dinner"), now) is None
+        assert cache.get(make_key("정", 0, date(2026, 10, 20), "lunch"), now) is None
+        assert cache.get(make_key("병", 1, date(2026, 10, 20), "lunch"), now) is None  # 버킷이 다르면 별도
 
 
 # ===================== fallback =====================
@@ -215,20 +224,62 @@ class TestFallback:
         """같은 컨텍스트 → 같은 결과"""
         assert build_fallback_result(_ctx()) == build_fallback_result(_ctx())
 
-    def test_menu_from_target_and_avoid_from_avoid_ohaeng(self):
-        from app.data.fallback_menu import FALLBACK_MENU
+    def test_menu_is_first_candidate(self):
+        """fallback은 LLM에 넘기는 것과 같은 후보의 첫 번째를 쓴다"""
         r = build_fallback_result(_ctx())
-        assert r.menu in [m for m, _ in FALLBACK_MENU["목"]["lunch"]]
-        assert r.avoid_menu in [m for m, _ in FALLBACK_MENU["금"]["lunch"]]
-        assert r.chosen_basis in ("color", "taste")
+        assert (r.menu, r.chosen_basis) == menu_candidates(_ctx())[0]
+        assert r.avoid_menu == avoid_candidates(_ctx())[0][0]
 
-    def test_all_30_cells_have_menu(self):
-        """오행 5 × 끼니 6 = 30칸 모두 메뉴가 있어야 함"""
-        from app.data.fallback_menu import FALLBACK_MENU
-        meals = ["breakfast", "brunch", "lunch", "snack", "dinner", "late_night"]
+
+# ===================== 메뉴 풀 / 후보 =====================
+MEALS = ["breakfast", "brunch", "lunch", "snack", "dinner", "late_night"]
+
+
+class TestMenuPool:
+    def test_every_cell_has_enough_candidates(self):
+        """오행 5 × 끼니 6 = 30칸 모두 후보 수 이상"""
         for oh in "목화토금수":
-            for meal in meals:
-                assert FALLBACK_MENU[oh][meal], f"{oh}/{meal} 비어 있음"
+            for meal in MEALS:
+                assert len(MENU_POOL[oh][meal]) >= CANDIDATE_COUNT, f"{oh}/{meal}"
+
+    def test_basis_values_and_no_duplicates(self):
+        for oh in "목화토금수":
+            for meal in MEALS:
+                names = [m for m, _ in MENU_POOL[oh][meal]]
+                assert len(names) == len(set(names)), f"{oh}/{meal} 중복"
+                assert all(b in ("color", "taste") for _, b in MENU_POOL[oh][meal])
+
+    def test_eat_and_avoid_never_overlap(self):
+        """같은 끼니에서 X 칸과 'X를 극하는 오행' 칸이 겹치면 먹을 메뉴 = 피해야 할 메뉴가 될 수 있음"""
+        for oh in "목화토금수":
+            avoid = get_avoid_ohaeng(oh)
+            for meal in MEALS:
+                eat = {m for m, _ in MENU_POOL[oh][meal]}
+                bad = {m for m, _ in MENU_POOL[avoid][meal]}
+                assert not eat & bad, f"{oh}/{avoid} {meal}: {eat & bad}"
+
+
+class TestCandidates:
+    def test_deterministic_and_from_right_cells(self):
+        ctx = _ctx()
+        assert menu_candidates(ctx) == menu_candidates(_ctx())
+        assert len(menu_candidates(ctx)) == CANDIDATE_COUNT
+        assert all(c in MENU_POOL["목"]["lunch"] for c in menu_candidates(ctx))
+        assert all(c in MENU_POOL["금"]["lunch"] for c in avoid_candidates(ctx))
+
+    def test_vary_by_bucket_and_date(self):
+        """버킷/날짜가 바뀌면 후보 조합이 달라진다 (한 달 × 버킷에서 여러 조합이 나와야 함)"""
+        combos = {
+            tuple(menu_candidates(_ctx(bucket=b, today=date(2026, 10, 1) + timedelta(days=d))))
+            for b in range(PERSON_BUCKETS) for d in range(30)
+        }
+        assert len(combos) > 30
+
+    def test_person_bucket_range_and_spread(self):
+        start = date(1990, 1, 1)
+        buckets = [person_bucket(start + timedelta(days=i)) for i in range(400)]
+        assert set(buckets) == set(range(PERSON_BUCKETS))
+        assert person_bucket(date(1995, 3, 15)) == person_bucket(date(1995, 3, 15))
 
     def test_josa(self):
         """받침에 맞는 조사: (으)로, 은/는"""

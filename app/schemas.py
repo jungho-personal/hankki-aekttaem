@@ -92,13 +92,14 @@ class BapgwaeResponse(BaseModel):
 class BapgwaeContext(BaseModel):
     """
     코드(서버)가 계산한 값 묶음. LLM 프롬프트와 fallback 문구 생성에 같은 값을 넘긴다.
-    (사용자 생년월일 원본은 넣지 않음 — 캐시 키와 동일하게 일간/날짜/끼니에서 파생되는 값만)
+    (사용자 생년월일 원본은 넣지 않음 — 캐시 키와 동일하게 일간/버킷/날짜/끼니에서 파생되는 값만)
     """
 
     today: date
     meal: MealKey
     meal_label: str
     my_ilgan: str
+    bucket: int = 0  # 생년월일 버킷 (candidates.person_bucket). 메뉴 후보 시드 + 캐시 키
     today_iljin: str
     my_ohaeng: str
     today_ohaeng: str

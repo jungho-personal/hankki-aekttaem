@@ -1,7 +1,7 @@
 """
 결과 고정 캐시 (핸드오프 4-5장, 5-2장 7번)
 
-- 키: (사용자 일간, KST 오늘 날짜, 끼니)
+- 키: (사용자 일간, 생년월일 버킷, KST 오늘 날짜, 끼니)
 - 만료: 다음 KST 자정
 - MVP: 인메모리. 서버 재시작/재배포 시 휘발되고, 인스턴스가 여러 개면 인스턴스끼리 결과가 다를 수 있다.
   필요해지면 이 클래스와 같은 get/set_if_absent 인터페이스로 Redis 구현을 만들어 교체한다.
@@ -12,13 +12,13 @@ from typing import Any, Optional, Tuple
 
 from app.services.time_util import next_kst_midnight, now_kst
 
-# 캐시 키 타입: (일간, 날짜, 끼니)
-CacheKey = Tuple[str, date, str]
+# 캐시 키 타입: (일간, 버킷, 날짜, 끼니)
+CacheKey = Tuple[str, int, date, str]
 
 
-def make_key(ilgan: str, today: date, meal: str) -> CacheKey:
-    """캐시 키 생성 (일간 + KST 날짜 + 끼니)"""
-    return (ilgan, today, meal)
+def make_key(ilgan: str, bucket: int, today: date, meal: str) -> CacheKey:
+    """캐시 키 생성 (일간 + 생년월일 버킷 + KST 날짜 + 끼니)"""
+    return (ilgan, bucket, today, meal)
 
 
 class ResultCache:
@@ -72,7 +72,7 @@ class ResultCache:
             return len(self._store)
 
     def _purge_expired(self, current: datetime) -> None:
-        """만료된 항목 정리 (Lock을 잡은 상태에서만 호출). 키가 하루 최대 60개라 전체 순회해도 부담 없음"""
+        """만료된 항목 정리 (Lock을 잡은 상태에서만 호출). 키가 하루 최대 240개(일간 10 × 버킷 4 × 끼니 6)라 전체 순회해도 부담 없음"""
         expired = [k for k, (_, exp) in self._store.items() if current >= exp]
         for k in expired:
             del self._store[k]

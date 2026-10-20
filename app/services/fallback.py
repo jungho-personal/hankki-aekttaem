@@ -1,14 +1,14 @@
 """
 LLM 실패/미설정 시 룰 기반 밥괘 생성 (핸드오프 4-5장, 5-2장 3번, 12-2장 3단계)
 
-- 메뉴: 오행 × 끼니 30칸 표에서 선택
-- 선택은 결정적(deterministic): 같은 (일간, 날짜, 끼니)면 항상 같은 메뉴
+- 메뉴: LLM에 넘기는 것과 같은 후보(candidates.menu_candidates) 중 첫 번째
+- 선택은 결정적(deterministic): 같은 (일간, 버킷, 날짜, 끼니)면 항상 같은 메뉴
   → 캐시가 없어도, 서버가 재시작돼도 fallback 결과는 동일
 - 문구: 템플릿 고정 문구
 """
-from app.data.fallback_menu import FALLBACK_MENU, LUCKY_SIDE_DISH, ORACLE_BY_TODAY
+from app.data.fallback_menu import LUCKY_SIDE_DISH, ORACLE_BY_TODAY
 from app.schemas import BapgwaeContext, BapgwaeResult
-from app.services.manseryeok import GAN_KO
+from app.services.candidates import avoid_candidates, menu_candidates, seed_of
 from app.services.text_util import euro as _euro
 from app.services.text_util import josa as _josa
 from app.services.ohaeng import (
@@ -17,14 +17,6 @@ from app.services.ohaeng import (
     PRESCRIPTION_BOOST,
     label,
 )
-
-
-def seed_of(ctx: BapgwaeContext) -> int:
-    """
-    결정적 선택용 정수. Python 내장 hash()는 프로세스마다 값이 바뀌므로 쓰지 않는다.
-    날짜 서수 + 일간 index → 날마다, 일간마다 다른 칸이 골라진다.
-    """
-    return ctx.today.toordinal() + GAN_KO.index(ctx.my_ilgan)
 
 
 def pick(items: list, seed: int):
@@ -58,11 +50,11 @@ def build_fallback_result(ctx: BapgwaeContext) -> BapgwaeResult:
     target = ctx.target_ohaeng
     attr = OHAENG_ATTR[target]
 
-    # 1) 먹을 메뉴: 대상 오행 × 끼니 칸에서 선택
-    menu, basis = pick(FALLBACK_MENU[target][ctx.meal], seed)
+    # 1) 먹을 메뉴: LLM과 같은 후보 중 첫 번째 (대상 오행 × 끼니 칸)
+    menu, basis = menu_candidates(ctx)[0]
 
-    # 2) 피해야 할 메뉴: 대상 오행을 극하는 오행 × 같은 끼니 칸에서 선택
-    avoid_menu, _ = pick(FALLBACK_MENU[ctx.avoid_ohaeng][ctx.meal], seed)
+    # 2) 피해야 할 메뉴: 대상 오행을 극하는 오행 × 같은 끼니 칸의 첫 후보
+    avoid_menu, _ = avoid_candidates(ctx)[0]
 
     # 3) 오행 근거: 고른 기준(색/맛)을 그대로 설명
     basis_word = f"색({attr['color']})" if basis == "color" else f"맛({attr['taste']})"

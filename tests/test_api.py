@@ -133,14 +133,29 @@ def test_llm_result_cached_same_day(monkeypatch):
     assert first["result"] == second["result"]
 
 
-def test_cache_key_is_ilgan_not_birthdate(monkeypatch):
-    """일간이 같은 다른 생일(10일 차이 → 같은 천간)은 같은 캐시를 공유 (의도된 동작, 4-5장)"""
+def _birth_dates_same_ilgan(same_bucket: bool):
+    """1995-03-15와 일간이 같고(10일 간격) 버킷이 같은/다른 생일 하나를 찾는다"""
+    from datetime import date, timedelta
+    from app.services.candidates import person_bucket
+    base = date(1995, 3, 15)
+    for k in range(1, 200):
+        other = base + timedelta(days=10 * k)
+        if (person_bucket(other) == person_bucket(base)) == same_bucket:
+            return base.isoformat(), other.isoformat()
+    raise AssertionError("조건에 맞는 날짜 없음")
+
+
+@pytest.mark.parametrize("same_bucket, expected_calls", [(True, 1), (False, 2)])
+def test_cache_key_is_ilgan_and_bucket(monkeypatch, same_bucket, expected_calls):
+    """일간이 같아도 생년월일 버킷이 다르면 따로 뽑고, 버킷까지 같으면 캐시 공유"""
     calls = []
     enable_fake_llm(monkeypatch, lambda ctx: calls.append(ctx) or fake_result())
-    a = client.post("/api/bapgwae", json={"birth_date": "1995-03-15", "calendar": "solar", "meal": "lunch"}).json()
-    b = client.post("/api/bapgwae", json={"birth_date": "1995-03-25", "calendar": "solar", "meal": "lunch"}).json()
+    d1, d2 = _birth_dates_same_ilgan(same_bucket)
+    a = client.post("/api/bapgwae", json={"birth_date": d1, "calendar": "solar", "meal": "lunch"}).json()
+    b = client.post("/api/bapgwae", json={"birth_date": d2, "calendar": "solar", "meal": "lunch"}).json()
     assert a["my_ilgan"] == b["my_ilgan"]
-    assert len(calls) == 1 and b["is_cached"] is True
+    assert len(calls) == expected_calls
+    assert b["is_cached"] is same_bucket
 
 
 def test_different_meal_calls_llm_again(monkeypatch):

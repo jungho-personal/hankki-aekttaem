@@ -6,8 +6,8 @@ POST /api/bapgwae — 밥괘 생성 (핸드오프 4-2장 처리 흐름)
 2) 음력이면 양력 변환
 3) 만세력: 사용자 일간 / 오늘 일진
 4) 오행 관계로 처방 타입 결정
-5) 캐시 조회 (일간, KST 날짜, 끼니)
-6) Gemini 호출 → 실패 시 fallback
+5) 캐시 조회 (일간, 생년월일 버킷, KST 날짜, 끼니)
+6) Gemini 호출(메뉴 후보 중 선택) → 실패 시 fallback(첫 후보)
 6-1) 공양 슬롯: 밥괘 확정 후 광고 선택(코드) + 식신 멘트(LLM 별도 호출, 실패 시 고정 문구)
 7) 캐시 저장 (KST 자정 만료) — 밥괘 + 공양을 함께 저장. 단, fallback 결과는 저장하지 않음
 """
@@ -20,6 +20,7 @@ from fastapi import APIRouter, HTTPException
 from app.schemas import BapgwaeContext, BapgwaeRequest, BapgwaeResponse, BapgwaeResult, Offering
 from app.services import llm
 from app.services.cache import make_key, result_cache
+from app.services.candidates import person_bucket
 from app.services.fallback import build_fallback_result
 from app.services.offering import build_offering, fallback_comment, select_offering_slot
 from app.services.manseryeok import InvalidDateError, get_iljin, get_ilgan, lunar_to_solar
@@ -81,6 +82,7 @@ def build_context(req: BapgwaeRequest, now: datetime) -> BapgwaeContext:
         meal=meal,
         meal_label=MEAL_LABELS[meal],
         my_ilgan=my_ilgan,
+        bucket=person_bucket(birth_solar),
         today_iljin=today_iljin,
         my_ohaeng=my_ohaeng,
         today_ohaeng=today_ohaeng,
@@ -118,14 +120,14 @@ def _resolve_result(ctx: BapgwaeContext, now: datetime) -> tuple:
     Returns:
         (BapgwaeResult, Optional[Offering], is_fallback, is_cached)
 
-    캐시 값은 (밥괘 결과, 공양) 묶음. 공양 선택도 (일간, 날짜, 끼니)로 결정되므로 같은 키에 함께 고정한다.
+    캐시 값은 (밥괘 결과, 공양) 묶음. 메뉴 후보와 공양 선택도 (일간, 버킷, 날짜, 끼니)로 결정되므로 같은 키에 함께 고정한다.
 
     fallback 결과를 캐시에 넣지 않는 이유
     - LLM이 일시적으로 실패했을 때 fallback이 캐시되면 그날 자정까지 fallback으로 고정된다.
     - fallback은 결정적이라 캐시하지 않아도 같은 입력이면 같은 결과가 나온다.
     - 대신 LLM이 복구되면 그 끼니 결과가 fallback → LLM 결과로 한 번 바뀔 수 있다 (감수).
     """
-    key = make_key(ctx.my_ilgan, ctx.today, ctx.meal)
+    key = make_key(ctx.my_ilgan, ctx.bucket, ctx.today, ctx.meal)
 
     # 5) 캐시 조회
     cached = result_cache.get(key, now)
@@ -161,8 +163,8 @@ def create_bapgwae(req: BapgwaeRequest, now: Optional[datetime] = None) -> Bapgw
 
     # 요청 로그: 생년월일 원본은 남기지 않고 파생값만 기록 (개인정보 최소화)
     logger.info(
-        "bapgwae date=%s meal=%s ilgan=%s iljin=%s type=%s target=%s menu=%s offering=%s fallback=%s cached=%s",
-        ctx.today, ctx.meal, ctx.my_ilgan, ctx.today_iljin, ctx.prescription_type,
+        "bapgwae date=%s meal=%s ilgan=%s bucket=%s iljin=%s type=%s target=%s menu=%s offering=%s fallback=%s cached=%s",
+        ctx.today, ctx.meal, ctx.my_ilgan, ctx.bucket, ctx.today_iljin, ctx.prescription_type,
         ctx.target_ohaeng, result.menu,
         f"{offering.sponsor_name}(demo={offering.is_demo})" if offering else None,
         is_fallback, is_cached,

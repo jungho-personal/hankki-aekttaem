@@ -20,11 +20,13 @@ app/
 │  ├─ manseryeok.py     # 음력→양력, 일간/일진 (lunar_python)
 │  ├─ ohaeng.py         # 오행 매핑, 상생/상극, 처방 타입
 │  ├─ llm.py            # Gemini 호출, JSON 검증
-│  ├─ cache.py          # 결과 고정 캐시 (일간+날짜+끼니, KST 자정 만료, 인메모리)
+│  ├─ cache.py          # 결과 고정 캐시 (일간+생년월일 버킷+날짜+끼니, KST 자정 만료, 인메모리)
+│  ├─ candidates.py     # 생년월일 버킷, 메뉴 후보 결정적 추출 (LLM은 후보 중 선택)
 │  ├─ fallback.py       # LLM 실패/미설정 시 룰 기반 결과
 │  ├─ offering.py       # 공양 슬롯: 광고 선택, 표기 문구, 고정 멘트
 │  └─ text_util.py      # 조사 처리 (은/는, (으)로)
-├─ data/fallback_menu.py  # 오행 × 끼니 30칸 fallback 메뉴
+├─ data/menu_pool.py     # 오행 × 끼니 30칸 메뉴 후보 풀 (LLM 후보 + fallback 공용)
+├─ data/fallback_menu.py  # fallback 반찬, 신탁
 ├─ data/offerings.py     # 공양 슬롯 광고 DB (실제 광고주 / 시연용 예시 / 고정 멘트)
 └─ schemas.py           # 요청/응답 Pydantic 모델
 static/index.html       # 프론트 (워크숍에서 교체할 대상)

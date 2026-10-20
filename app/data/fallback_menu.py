@@ -1,54 +1,8 @@
 """
-오행 × 끼니 30칸 fallback 메뉴 (핸드오프 4-5장 표 그대로) — LLM 실패 시에만 사용
+fallback 전용 고정 문구 데이터 — LLM 실패 시에만 사용
 
-각 메뉴에 어떤 기준(color=색 / taste=맛)으로 그 오행에 넣었는지 붙여두었다.
-fallback 응답의 chosen_basis / basis_comment / ohaeng_reason을 룰 기반으로 만들 때 쓴다.
-(원본 표는 "색/맛 중 하나 기준으로 느슨하게" 만든 것이라, 기준 표기도 느슨한 판단임)
+메뉴 후보는 app/data/menu_pool.py (LLM 후보 제시와 fallback이 같은 풀을 쓴다)
 """
-
-# FALLBACK_MENU[오행][끼니] = [(메뉴, 기준), ...]
-FALLBACK_MENU = {
-    "목": {  # 초록 / 신맛
-        "breakfast": [("야채죽", "color"), ("그린 스무디", "color")],
-        "brunch": [("샐러드", "color"), ("샌드위치", "color")],
-        "lunch": [("비빔밥", "color"), ("쌈밥", "color"), ("냉모밀", "taste")],
-        "snack": [("요거트", "taste"), ("과일", "taste")],
-        "dinner": [("샤브샤브", "color"), ("월남쌈", "color")],
-        "late_night": [("쫄면", "taste"), ("비빔국수", "taste")],
-    },
-    "화": {  # 빨강 / 쓴맛
-        "breakfast": [("토마토 스프", "color")],
-        "brunch": [("김치볶음밥", "color")],
-        "lunch": [("제육볶음", "color"), ("김치찌개", "color")],
-        "snack": [("떡볶이", "color")],
-        "dinner": [("닭갈비", "color"), ("육개장", "color")],
-        "late_night": [("불닭", "color"), ("닭발", "color")],
-    },
-    "토": {  # 노랑 / 단맛
-        "breakfast": [("호박죽", "color"), ("계란토스트", "color")],
-        "brunch": [("오므라이스", "color"), ("팬케이크", "taste")],
-        "lunch": [("카레", "color"), ("돈까스", "color")],
-        "snack": [("고구마", "taste"), ("붕어빵", "taste")],
-        "dinner": [("불고기", "taste"), ("찜닭", "taste")],
-        "late_night": [("치킨", "color")],
-    },
-    "금": {  # 흰색 / 매운맛
-        "breakfast": [("누룽지", "color"), ("콩나물국밥", "color")],
-        "brunch": [("우동", "color")],
-        "lunch": [("짬뽕", "taste"), ("설렁탕", "color"), ("닭칼국수", "color")],
-        "snack": [("찐빵", "color")],
-        "dinner": [("마라탕", "taste"), ("백숙", "color")],
-        "late_night": [("라면", "taste")],
-    },
-    "수": {  # 검정 / 짠맛
-        "breakfast": [("미역국", "color")],
-        "brunch": [("김밥", "color")],
-        "lunch": [("짜장면", "color"), ("순대국", "taste"), ("초밥", "taste")],
-        "snack": [("흑임자 라떼", "color")],
-        "dinner": [("생선구이", "taste"), ("해물찜", "taste")],
-        "late_night": [("족발", "taste"), ("짜파게티", "color")],
-    },
-}
 
 # ===== 행운의 반찬 (오행별, fallback 전용) =====
 LUCKY_SIDE_DISH = {

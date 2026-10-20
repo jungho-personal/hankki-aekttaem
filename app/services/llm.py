@@ -17,6 +17,7 @@ from typing import Optional
 from pydantic import ValidationError
 
 from app.schemas import BapgwaeContext, BapgwaeResult, OfferingCommentOutput, OfferingSlot
+from app.services.candidates import avoid_candidates, menu_candidates
 from app.services.ohaeng import OHAENG_ATTR, label
 from app.services.time_util import MEAL_GUIDE
 
@@ -85,10 +86,10 @@ SYSTEM_INSTRUCTION = """\
 재미용 엔터테인먼트 서비스이며 정통 명리 해석이 아니다.
 
 규칙
-1. 메뉴는 해당 끼니에 한국에서 대중적으로 사 먹을 수 있는 메뉴 1개만 고른다.
-   반드시 입력의 "끼니 메뉴 성격"에 맞는 메뉴를 고른다. (예: 저녁이면 고기/찌개/안주류, 간식이면 디저트/분식류)
-2. 대상 오행의 "색" 또는 "맛" 중 하나를 골라, 메뉴 자체가 그 기준을 만족해야 한다. 둘 다 만족해도 된다.
-   고른 기준을 chosen_basis에 "color" 또는 "taste"로 적는다.
+1. menu는 입력의 "메뉴 후보" 중 하나를 골라 이름을 그대로 적는다. 후보에 없는 메뉴를 지어내지 않는다.
+   오늘 일진과 처방 이야기에 가장 잘 어울리는 후보를 고른다.
+2. 각 후보 옆 괄호는 그 메뉴가 대상 오행의 "색"과 "맛" 중 무엇을 만족하는지다.
+   고른 후보의 기준을 chosen_basis에 "color"(색) 또는 "taste"(맛)로 적는다.
 3. basis_comment는 반드시 이 형식을 따른다:
    "흠.. 오늘은 [안 고른 기준] 음식을 내려주고 싶다만, 네 운을 보아하니 [고른 기준] 음식이 더 좋겠구만"
    예) 화, 색 선택: "흠.. 오늘은 쓴맛 음식을 내려주고 싶다만, 네 운을 보아하니 빨간 음식이 더 좋겠구만"
@@ -100,14 +101,25 @@ SYSTEM_INSTRUCTION = """\
    - 부스트: "[메뉴]로 [부족한 기운]을 끌어올리시게"
    - 보양: "[메뉴]로 [본래 기운]을 든든히 채우시게"
 7. lucky_side_dish: 대상 오행과 어울리는 흔한 반찬 1개.
-8. avoid_menu: "피해야 할 오행"의 색 또는 맛에 해당하는, 같은 끼니(같은 메뉴 성격)의 대중 메뉴 1개. avoid_reason은 식신 말투 한 줄.
+8. avoid_menu: 입력의 "피해야 할 메뉴 후보" 중 하나를 이름 그대로 적는다. avoid_reason은 식신 말투 한 줄.
 9. 과도한 비하/혐오 표현 금지. 의학적/건강 효능을 단정하는 표현 금지.
 10. 모든 값은 한국어로, 각 문장은 한두 줄 이내로 짧게.
 """
 
 
+BASIS_LABEL = {"color": "색", "taste": "맛"}
+
+
+def format_candidates(candidates: list) -> str:
+    """[("비빔밥", "color"), ...] → "비빔밥(색), ..." """
+    return ", ".join(f"{menu}({BASIS_LABEL[basis]})" for menu, basis in candidates)
+
+
 def build_prompt(ctx: BapgwaeContext) -> str:
-    """컨텍스트(서버 계산값)를 LLM 입력 텍스트로 만든다 (핸드오프 7장 입력값)"""
+    """
+    컨텍스트(서버 계산값)를 LLM 입력 텍스트로 만든다 (핸드오프 7장 입력값)
+    메뉴는 코드가 뽑은 후보 중에서만 고르게 한다 (자유 선택 시 뻔한 메뉴로 쏠림 방지)
+    """
     target_attr = OHAENG_ATTR[ctx.target_ohaeng]
     avoid_attr = OHAENG_ATTR[ctx.avoid_ohaeng]
     meal_guide = MEAL_GUIDE[ctx.meal]
@@ -120,6 +132,8 @@ def build_prompt(ctx: BapgwaeContext) -> str:
 - 처방 타입: {ctx.prescription_type}
 - 대상 오행(먹어야 할 기운): {label(ctx.target_ohaeng)} — 색: {target_attr['color']}, 맛: {target_attr['taste']}
 - 피해야 할 오행: {label(ctx.avoid_ohaeng)} — 색: {avoid_attr['color']}, 맛: {avoid_attr['taste']}
+- 메뉴 후보: {format_candidates(menu_candidates(ctx))}
+- 피해야 할 메뉴 후보: {format_candidates(avoid_candidates(ctx))}
 """
 
 
@@ -158,7 +172,11 @@ def generate_bapgwae(ctx: BapgwaeContext) -> BapgwaeResult:
     Raises:
         LLMError: 키 미설정, 네트워크/한도 초과/타임아웃, JSON 스키마 불일치 등 모든 실패
     """
-    return parse_response_text(_call_json(SYSTEM_INSTRUCTION, build_prompt(ctx), BapgwaeResult))
+    result = parse_response_text(_call_json(SYSTEM_INSTRUCTION, build_prompt(ctx), BapgwaeResult))
+    # 후보 밖 메뉴는 실패로 보지 않고 기록만 한다 (표기 차이 "김치찌개" vs "돼지 김치찌개" 정도는 허용)
+    if result.menu not in [m for m, _ in menu_candidates(ctx)]:
+        logger.warning("LLM이 후보 밖 메뉴 선택: %s (후보: %s)", result.menu, format_candidates(menu_candidates(ctx)))
+    return result
 
 
 def parse_response_text(text: Optional[str]) -> BapgwaeResult:
