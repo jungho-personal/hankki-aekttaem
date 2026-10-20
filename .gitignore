@@ -1,0 +1,13 @@
+# 가상환경 / 캐시
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 환경변수 (API 키 커밋 금지 — 핸드오프 5-2장 2번)
+.env
+
+# OS / 에디터
+.DS_Store
+.idea/
+.vscode/

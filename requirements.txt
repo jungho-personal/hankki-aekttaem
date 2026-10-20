@@ -1,0 +1,8 @@
+# ===== 서비스 런타임 의존성 (Railway 배포용) =====
+# 버전은 2026-10-20 로컬(Python 3.10.5)에서 테스트 통과한 버전으로 고정
+fastapi==0.150.0
+uvicorn[standard]==0.54.0
+pydantic==2.14.1
+lunar_python==1.4.8      # 만세력 (일진/일간, 음력→양력)
+google-genai==2.31.0     # Gemini SDK (키 없으면 import도 안 함)
+tzdata==2026.5           # zoneinfo("Asia/Seoul")용. 컨테이너에 OS 타임존 DB가 없을 때 대비

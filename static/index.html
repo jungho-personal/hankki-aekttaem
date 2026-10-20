@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <!-- viewport: 모바일 최적화 (핸드오프 11-2장 보상형 광고 조건이기도 함) -->
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>한끼액땜 - 오늘의 밥괘</title>
+  <!--
+    기본 프론트 뼈대 (핸드오프 12-2장 4단계)
+    - 기능만 동작하는 최소 버전. 디자인은 워크숍 현장에서 AI로 교체한다.
+    - 의존성 없음 (순수 HTML/CSS/JS). API: POST /api/bapgwae (같은 서버라 CORS 불필요)
+  -->
+  <style>
+    /* ===== 최소 스타일 (워크숍에서 교체) ===== */
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 480px; margin: 0 auto; padding: 16px; line-height: 1.6; }
+    h1 { font-size: 1.5rem; margin-bottom: 4px; }
+    fieldset { border: 1px solid #ccc; border-radius: 8px; margin: 12px 0; }
+    .birth-inputs input { width: 5em; }
+    .meal-tabs button { margin: 2px; padding: 6px 10px; border: 1px solid #999; border-radius: 16px; background: #fff; cursor: pointer; }
+    .meal-tabs button.active { background: #333; color: #fff; }
+    .cta { width: 100%; padding: 12px; font-size: 1.1rem; margin-top: 8px; cursor: pointer; }
+    .hidden { display: none; }
+    .error { color: #c00; }
+    #result { border: 1px solid #ccc; border-radius: 8px; padding: 12px; margin-top: 16px; white-space: pre-line; }
+    footer { margin-top: 32px; font-size: 0.9rem; color: #666; border-top: 1px solid #eee; padding-top: 12px; }
+  </style>
+</head>
+<body>
+  <!-- ===== 랜딩 (핸드오프 2-1장) ===== -->
+  <header>
+    <h1>🍚 오늘의 밥괘는?!</h1>
+    <p>쩝쩝박사님도 궁금해 한다는 오늘의 밥괘!</p>
+    <p id="greeting"></p>
+  </header>
+
+  <!-- ===== 입력 폼 ===== -->
+  <form id="form">
+    <fieldset>
+      <legend>생년월일</legend>
+      <!-- 년/월/일을 따로 받는 이유: 음력엔 "2월 30일" 같은 날짜가 있어서 <input type="date">로는 입력 불가 -->
+      <div class="birth-inputs">
+        <input id="year" type="number" min="1900" max="2100" placeholder="1995" required> 년
+        <input id="month" type="number" min="1" max="12" placeholder="3" required> 월
+        <input id="day" type="number" min="1" max="31" placeholder="15" required> 일
+      </div>
+      <label><input type="radio" name="calendar" value="solar" checked> 양력</label>
+      <label><input type="radio" name="calendar" value="lunar"> 음력</label>
+      <!-- 윤달 토글: 음력일 때만 노출 -->
+      <label id="leap-wrap" class="hidden"><input id="leap" type="checkbox"> 윤달</label>
+    </fieldset>
+
+    <fieldset>
+      <legend>끼니 <small id="meal-hint"></small></legend>
+      <div class="meal-tabs" id="meal-tabs"></div>
+    </fieldset>
+
+    <button class="cta" type="submit" id="submit">🔮 식신께 밥괘 여쭙기</button>
+    <p class="error" id="error"></p>
+  </form>
+
+  <!-- ===== 결과 (핸드오프 2-2장 템플릿) ===== -->
+  <section id="result" class="hidden"></section>
+
+  <!-- ===== 푸터 광고 문의 (핸드오프 2-1장, 11-3장 — MVP 포함) ===== -->
+  <footer>
+    🙏 식신께 공양을 올리고 싶은 사장님은 연락 주시게 →
+    <!-- TODO: 광고 문의 연락처(메일/폼 URL) 미정 -->
+    <a href="#" id="ad-inquiry">[광고 문의]</a>
+    <p>- 한끼액땜 - 재미로 보는 밥괘입니다.</p>
+  </footer>
+
+  <script>
+    // ===== 상수 =====
+    // 끼니 6종 (핸드오프 3장). start: KST 시작 시각(분). 서버 time_util.py와 같은 규칙
+    const MEALS = [
+      { key: "breakfast",  label: "🌅 아침", start: 5 * 60 },
+      { key: "brunch",     label: "🥐 아점", start: 10 * 60 },
+      { key: "lunch",      label: "🍱 점심", start: 11 * 60 + 30 },
+      { key: "snack",      label: "🍩 간식", start: 14 * 60 + 30 },
+      { key: "dinner",     label: "🌙 저녁", start: 17 * 60 + 30 },
+      { key: "late_night", label: "🌃 야식", start: 22 * 60 },
+    ];
+
+    // 지역별 인사 (핸드오프 2-1장, 랜덤 노출)
+    const GREETINGS = [
+      "마! 밥 뭇나? 한끼 잘 챙기래이~",
+      "밥 드셨슈~? 잘 챙기슈~",
+      "밥은 묵었는가? 든든허게 챙기랑께~",
+      "밥 먹었드래요? 잘 챙겨 먹드래요~",
+      "밥 먹언? 잘 챙겨 먹읍서~",
+    ];
+
+    // 처방 타입별 이모지 (핸드오프 2-2장)
+    const PRESCRIPTION_EMOJI = { "액땜": "🧧", "부스트": "🔥", "보양": "🍚" };
+
+    // ===== 상태 =====
+    // selectedMeal: null이면 "자동"(서버가 KST로 판별), 탭을 누르면 해당 키로 고정
+    const state = {
+      selectedMeal: null,
+      autoMeal: detectMealKST(),
+      loading: false,
+    };
+
+    // ===== 유틸 =====
+    /** 브라우저 시간대와 무관하게 KST 시/분을 구해 끼니를 판별 (탭 초기 표시용. 최종 판별은 서버) */
+    function detectMealKST() {
+      const parts = new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+      }).formatToParts(new Date());
+      const h = Number(parts.find(p => p.type === "hour").value);
+      const m = Number(parts.find(p => p.type === "minute").value);
+      const minutes = h * 60 + m;
+      // 야식은 자정을 넘김: 22:00 이후 또는 05:00 이전
+      if (minutes >= MEALS[5].start || minutes < MEALS[0].start) return "late_night";
+      let current = MEALS[0].key;
+      for (const meal of MEALS.slice(0, 5)) if (minutes >= meal.start) current = meal.key;
+      return current;
+    }
+
+    /** 숫자를 2자리 문자열로 */
+    const pad2 = n => String(n).padStart(2, "0");
+
+    // ===== 렌더링 =====
+    /** 끼니 탭 렌더링: 수동 선택이 있으면 그것, 없으면 자동 끼니를 활성 표시 */
+    function renderMealTabs() {
+      const active = state.selectedMeal || state.autoMeal;
+      const tabs = document.getElementById("meal-tabs");
+      tabs.innerHTML = "";
+      for (const meal of MEALS) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = meal.label;
+        btn.className = meal.key === active ? "active" : "";
+        btn.onclick = () => { state.selectedMeal = meal.key; renderMealTabs(); };
+        tabs.appendChild(btn);
+      }
+      document.getElementById("meal-hint").textContent = state.selectedMeal ? "(직접 선택)" : "(지금 시각 기준 자동)";
+    }
+
+    /** 결과 렌더링 (2-2장 템플릿). textContent만 사용해 LLM 출력이 HTML로 해석되지 않게 함 */
+    function renderResult(data) {
+      const r = data.result;
+      const emoji = PRESCRIPTION_EMOJI[data.prescription_type] || "🍚";
+      const lines = [
+        "✨ 식신께서 밥괘를 내려주셨다...! ✨",
+        "",
+        `🍱 오늘의 ${data.meal_label} 밥괘: ${r.menu}`,
+        "",
+        `🤔 ${r.basis_comment}`,
+        `   ${r.ohaeng_reason}`,
+        "",
+        "📜 신탁",
+        r.oracle,
+        "",
+        `${emoji} [${data.prescription_type}] ${r.message}`,
+        "",
+        `🍀 행운의 반찬: ${r.lucky_side_dish}`,
+        `🚫 오늘 피해야 할 메뉴: ${r.avoid_menu} - ${r.avoid_reason}`,
+        "",
+        `(오늘 일진 ${data.today_iljin} · 나의 일간 ${data.my_ilgan}(${data.my_ohaeng}))`,
+        "- 한끼액땜 -",
+      ];
+      const section = document.getElementById("result");
+      section.textContent = lines.join("\n");
+      section.classList.remove("hidden");
+      // offering(공양 슬롯)은 MVP에서 항상 null → 렌더링하지 않음 (핸드오프 11-3장)
+    }
+
+    // ===== 이벤트 =====
+    /** 양력/음력 전환 시 윤달 토글 노출 여부 변경 */
+    for (const radio of document.querySelectorAll('input[name="calendar"]')) {
+      radio.onchange = () => {
+        const isLunar = document.querySelector('input[name="calendar"]:checked').value === "lunar";
+        document.getElementById("leap-wrap").classList.toggle("hidden", !isLunar);
+        if (!isLunar) document.getElementById("leap").checked = false;
+      };
+    }
+
+    /** 제출: API 호출 → 결과 렌더링 */
+    document.getElementById("form").onsubmit = async (e) => {
+      e.preventDefault();
+      if (state.loading) return;
+
+      const errorEl = document.getElementById("error");
+      const submitBtn = document.getElementById("submit");
+      errorEl.textContent = "";
+
+      const calendar = document.querySelector('input[name="calendar"]:checked').value;
+      const body = {
+        birth_date: `${document.getElementById("year").value}-${pad2(document.getElementById("month").value)}-${pad2(document.getElementById("day").value)}`,
+        calendar,
+        is_leap_month: calendar === "lunar" && document.getElementById("leap").checked,
+        meal: state.selectedMeal, // null이면 서버가 KST로 자동 판별
+      };
+
+      state.loading = true;
+      submitBtn.disabled = true;
+      submitBtn.textContent = "🔮 식신께서 점지 중...";
+      try {
+        const res = await fetch("/api/bapgwae", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          // 이전 결과가 남아 있으면 오류와 헷갈리므로 숨김
+          document.getElementById("result").classList.add("hidden");
+          // 400: 서버 날짜 검증 메시지(문자열), 422: 형식 오류(배열)
+          errorEl.textContent = typeof data.detail === "string" ? data.detail : "생년월일 형식을 확인해 주시게";
+          return;
+        }
+        // 서버가 판별한 끼니로 탭 표시 동기화 (자동 모드일 때)
+        if (!state.selectedMeal) { state.autoMeal = data.meal; renderMealTabs(); }
+        renderResult(data);
+      } catch (err) {
+        errorEl.textContent = "식신과 연결이 끊겼다네... 잠시 후 다시 여쭈시게";
+        console.error(err);
+      } finally {
+        state.loading = false;
+        submitBtn.disabled = false;
+        submitBtn.textContent = "🔮 식신께 밥괘 여쭙기";
+      }
+    };
+
+    // ===== 초기화 =====
+    document.getElementById("greeting").textContent = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
+    renderMealTabs();
+  </script>
+</body>
+</html>

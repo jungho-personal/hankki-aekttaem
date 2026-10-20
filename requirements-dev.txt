@@ -1,0 +1,5 @@
+# ===== 개발/테스트 전용 (배포에는 불필요) =====
+-r requirements.txt
+pytest==9.1.1
+httpx==0.28.1                    # FastAPI TestClient
+korean_lunar_calendar==0.4.0     # scripts/verify_lunar.py 검증용 (한국천문연구원 기준 음력)
