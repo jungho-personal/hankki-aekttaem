@@ -43,14 +43,32 @@ class BapgwaeResult(BaseModel):
     avoid_reason: str
 
 
-class Offering(BaseModel):
-    """공양 슬롯 (MVP에서는 응답에 항상 null. 구조만 정의 — 핸드오프 6장, 11-3장)"""
+class OfferingSlot(BaseModel):
+    """
+    공양 슬롯 중 코드(광고 DB)가 채우는 부분 (핸드오프 11-3장)
+    LLM은 여기에 손대지 않고 comment만 따로 만든다.
+    """
 
     sponsor_name: str
     menu: str
+    disclosure: str  # 광고 표기 문구 (코드 고정)
+    link: str        # 없으면 "" → 프론트가 링크를 그리지 않음
+    is_demo: bool    # 시연용 예시 여부 → 프론트 표기 "[광고 예시]" / "[광고]"
+
+
+class Offering(OfferingSlot):
+    """
+    공양 슬롯 응답 (핸드오프 6장 구조 + is_demo)
+    노출할 광고가 없으면 응답의 offering은 null.
+    """
+
+    comment: str  # 식신 멘트 (LLM 생성, 실패 시 고정 문구)
+
+
+class OfferingCommentOutput(BaseModel):
+    """공양 멘트 LLM 출력 스키마 (밥괘와 별도 호출)"""
+
     comment: str
-    disclosure: str
-    link: str
 
 
 class BapgwaeResponse(BaseModel):

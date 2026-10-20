@@ -21,8 +21,11 @@ app/
 │  ├─ ohaeng.py         # 오행 매핑, 상생/상극, 처방 타입
 │  ├─ llm.py            # Gemini 호출, JSON 검증
 │  ├─ cache.py          # 결과 고정 캐시 (일간+날짜+끼니, KST 자정 만료, 인메모리)
-│  └─ fallback.py       # LLM 실패/미설정 시 룰 기반 결과
+│  ├─ fallback.py       # LLM 실패/미설정 시 룰 기반 결과
+│  ├─ offering.py       # 공양 슬롯: 광고 선택, 표기 문구, 고정 멘트
+│  └─ text_util.py      # 조사 처리 (은/는, (으)로)
 ├─ data/fallback_menu.py  # 오행 × 끼니 30칸 fallback 메뉴
+├─ data/offerings.py     # 공양 슬롯 광고 DB (실제 광고주 / 시연용 예시 / 고정 멘트)
 └─ schemas.py           # 요청/응답 Pydantic 모델
 static/index.html       # 프론트 (워크숍에서 교체할 대상)
 tests/                  # 단위/API 테스트
@@ -68,7 +71,16 @@ GEMINI_API_KEY=발급받은키 .venv/bin/uvicorn app.main:app --reload
 - `is_leap_month`: 음력일 때만 의미 있음
 - `meal`: `breakfast` | `brunch` | `lunch` | `snack` | `dinner` | `late_night` | `null`(KST 자동 판별)
 
-응답은 핸드오프 문서 6장과 같은 구조야. 오류 응답:
+응답은 핸드오프 문서 6장과 같은 구조야. `offering`(공양 슬롯)은 광고가 없으면 `null`이고, 있으면 아래 구조야.
+```json
+{"sponsor_name": "식신치킨", "menu": "간장치킨", "comment": "식신 멘트(LLM)",
+ "disclosure": "광고 표기 문구(코드 고정)", "link": "", "is_demo": true}
+```
+- 가게/메뉴/표기/링크는 코드(`app/data/offerings.py`)가 넣고, LLM은 `comment`만 만들어. 밥괘가 확정된 뒤에 별도 호출이라 밥괘 메뉴에는 영향 없음
+- 멘트 LLM이 실패하면 고정 문구로 대체 (밥괘는 그대로)
+- 실제 광고주 등록: `SPONSORS`에 `{"sponsor_name", "menu", "meals", "link"}` 추가 → 표기는 "이 추천은 OO으로부터 광고비를 받았습니다"로 자동 생성
+
+오류 응답:
 - `400`: 존재하지 않는 날짜(없는 윤달 포함), 미래 날짜, 1900년 이전. `detail`에 한글 메시지가 들어가
 - `422`: 형식 오류(날짜 형식, calendar/meal 값)
 
@@ -79,6 +91,7 @@ GEMINI_API_KEY=발급받은키 .venv/bin/uvicorn app.main:app --reload
 | `GEMINI_API_KEY` | X | 없으면 fallback 모드 |
 | `GEMINI_MODEL` | X | 모델명. 비우면 `gemini-3.5-flash-lite` (2026-10-20 확정. 실제 호출은 키 설정 후 확인 필요) |
 | `GEMINI_TIMEOUT_SEC` | X | Gemini 호출 타임아웃(초), 기본 15. 넘으면 fallback |
+| `OFFERING_DEMO` | X | `true`면 결과 아래 공양 슬롯에 **시연용 예시 광고**를 `[광고 예시]` 표기로 노출. 비우면 실제 광고주(`app/data/offerings.py`의 `SPONSORS`)만 노출 (현재 없음 → `offering: null`) |
 | `PORT` | Railway가 주입 | 직접 설정하지 않음 |
 
 ## 5. Railway 배포 체크리스트

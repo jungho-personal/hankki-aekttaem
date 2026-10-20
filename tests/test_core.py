@@ -271,6 +271,11 @@ class TestLlmParse:
         monkeypatch.setenv("GEMINI_API_KEY", "   ")
         assert llm.is_enabled() is False
 
+    def test_prompt_includes_meal_guide(self):
+        """프롬프트에 끼니별 메뉴 성격(핸드오프 3장)이 들어가야 끼니마다 메뉴가 갈림"""
+        assert "고기, 찌개, 안주" in llm.build_prompt(_ctx(meal="dinner", meal_label="저녁"))
+        assert "디저트, 분식" in llm.build_prompt(_ctx(meal="snack", meal_label="간식"))
+
     def test_model_env(self, monkeypatch):
         monkeypatch.delenv("GEMINI_MODEL", raising=False)
         assert llm.get_model_name() == llm.DEFAULT_MODEL

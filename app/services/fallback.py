@@ -9,6 +9,8 @@ LLM 실패/미설정 시 룰 기반 밥괘 생성 (핸드오프 4-5장, 5-2장 3
 from app.data.fallback_menu import FALLBACK_MENU, LUCKY_SIDE_DISH, ORACLE_BY_TODAY
 from app.schemas import BapgwaeContext, BapgwaeResult
 from app.services.manseryeok import GAN_KO
+from app.services.text_util import euro as _euro
+from app.services.text_util import josa as _josa
 from app.services.ohaeng import (
     OHAENG_ATTR,
     PRESCRIPTION_AEKTTAEM,
@@ -17,7 +19,7 @@ from app.services.ohaeng import (
 )
 
 
-def _seed(ctx: BapgwaeContext) -> int:
+def seed_of(ctx: BapgwaeContext) -> int:
     """
     결정적 선택용 정수. Python 내장 hash()는 프로세스마다 값이 바뀌므로 쓰지 않는다.
     날짜 서수 + 일간 index → 날마다, 일간마다 다른 칸이 골라진다.
@@ -25,29 +27,9 @@ def _seed(ctx: BapgwaeContext) -> int:
     return ctx.today.toordinal() + GAN_KO.index(ctx.my_ilgan)
 
 
-def _pick(items: list, seed: int):
+def pick(items: list, seed: int):
     """리스트에서 seed 기반으로 하나 선택"""
     return items[seed % len(items)]
-
-
-def _josa(word: str, with_batchim: str, without_batchim: str, rieul_as_without: bool = False) -> str:
-    """
-    받침에 맞는 조사를 붙인다. 예) 김밥+은/는 → 김밥은, 요거트+은/는 → 요거트는
-    rieul_as_without: (으)로처럼 ㄹ받침이면 받침 없는 쪽을 쓰는 조사 (예: 냉모밀로)
-    한글이 아닌 끝 글자는 받침 없음으로 처리
-    """
-    last = word[-1]
-    if not "가" <= last <= "힣":
-        return word + without_batchim
-    jong = (ord(last) - ord("가")) % 28  # 0이면 받침 없음, 8이면 ㄹ
-    if jong == 0 or (rieul_as_without and jong == 8):
-        return word + without_batchim
-    return word + with_batchim
-
-
-def _euro(word: str) -> str:
-    """(으)로 — 예) 김치볶음밥으로, 요거트로, 냉모밀로"""
-    return _josa(word, "으로", "로", rieul_as_without=True)
 
 
 def build_basis_comment(target_ohaeng: str, chosen_basis: str) -> str:
@@ -72,15 +54,15 @@ def build_message(ctx: BapgwaeContext, menu: str) -> str:
 
 def build_fallback_result(ctx: BapgwaeContext) -> BapgwaeResult:
     """컨텍스트로 룰 기반 밥괘 결과를 만든다"""
-    seed = _seed(ctx)
+    seed = seed_of(ctx)
     target = ctx.target_ohaeng
     attr = OHAENG_ATTR[target]
 
     # 1) 먹을 메뉴: 대상 오행 × 끼니 칸에서 선택
-    menu, basis = _pick(FALLBACK_MENU[target][ctx.meal], seed)
+    menu, basis = pick(FALLBACK_MENU[target][ctx.meal], seed)
 
     # 2) 피해야 할 메뉴: 대상 오행을 극하는 오행 × 같은 끼니 칸에서 선택
-    avoid_menu, _ = _pick(FALLBACK_MENU[ctx.avoid_ohaeng][ctx.meal], seed)
+    avoid_menu, _ = pick(FALLBACK_MENU[ctx.avoid_ohaeng][ctx.meal], seed)
 
     # 3) 오행 근거: 고른 기준(색/맛)을 그대로 설명
     basis_word = f"색({attr['color']})" if basis == "color" else f"맛({attr['taste']})"
@@ -93,7 +75,7 @@ def build_fallback_result(ctx: BapgwaeContext) -> BapgwaeResult:
         ohaeng_reason=ohaeng_reason,
         oracle=ORACLE_BY_TODAY[ctx.today_ohaeng],
         message=build_message(ctx, menu),
-        lucky_side_dish=_pick(LUCKY_SIDE_DISH[target], seed),
+        lucky_side_dish=pick(LUCKY_SIDE_DISH[target], seed),
         avoid_menu=avoid_menu,
         avoid_reason=f"{label(ctx.avoid_ohaeng)} 기운이 오늘 그대에게 필요한 {label(target)} 기운을 누르니 멀리하시게",
     )

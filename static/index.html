@@ -22,6 +22,11 @@
     .hidden { display: none; }
     .error { color: #c00; }
     #result { border: 1px solid #ccc; border-radius: 8px; padding: 12px; margin-top: 16px; white-space: pre-line; }
+    /* 공양 슬롯: 광고 표기는 구분되는 색/굵은 글씨로 (핸드오프 11-3장 표기 규칙) */
+    #offering { border: 1px dashed #b8860b; border-radius: 8px; padding: 12px; margin-top: 12px; }
+    #offering-body { white-space: pre-line; margin: 8px 0 0; }
+    .ad-label { display: inline-block; background: #b8860b; color: #fff; font-weight: bold; padding: 0 6px; border-radius: 4px; margin-right: 6px; }
+    .ad-disclosure { font-weight: bold; color: #8a6d00; }
     footer { margin-top: 32px; font-size: 0.9rem; color: #666; border-top: 1px solid #eee; padding-top: 12px; }
   </style>
 </head>
@@ -60,6 +65,14 @@
 
   <!-- ===== 결과 (핸드오프 2-2장 템플릿) ===== -->
   <section id="result" class="hidden"></section>
+
+  <!-- ===== 공양 슬롯 (핸드오프 2-3장, 11-3장) — 밥괘 결과와 분리된 별도 영역 ===== -->
+  <!-- 광고 표기([광고]/[광고 예시] + disclosure)는 LLM이 아니라 프론트가 고정 렌더링 -->
+  <section id="offering" class="hidden">
+    <div><span class="ad-label" id="ad-label"></span><span class="ad-disclosure" id="ad-disclosure"></span></div>
+    <p id="offering-body"></p>
+    <a id="offering-link" class="hidden" target="_blank" rel="noopener sponsored">가게 보러 가기 →</a>
+  </section>
 
   <!-- ===== 푸터 광고 문의 (핸드오프 2-1장, 11-3장 — MVP 포함) ===== -->
   <footer>
@@ -163,7 +176,32 @@
       const section = document.getElementById("result");
       section.textContent = lines.join("\n");
       section.classList.remove("hidden");
-      // offering(공양 슬롯)은 MVP에서 항상 null → 렌더링하지 않음 (핸드오프 11-3장)
+      renderOffering(data.offering);
+    }
+
+    /**
+     * 공양 슬롯 렌더링 (offering이 null이면 숨김)
+     * - 표기 라벨: is_demo면 "[광고 예시]", 아니면 "[광고]" — 응답과 무관하게 프론트가 고정으로 붙인다
+     * - 모든 문자열은 textContent로만 넣는다
+     */
+    function renderOffering(offering) {
+      const section = document.getElementById("offering");
+      if (!offering) { section.classList.add("hidden"); return; }
+
+      document.getElementById("ad-label").textContent = offering.is_demo ? "[광고 예시]" : "[광고]";
+      document.getElementById("ad-disclosure").textContent = offering.disclosure;
+      document.getElementById("offering-body").textContent = [
+        "🙏 오늘 식신께 공양을 올린 집이 있다는구나...",
+        "",
+        `   ${offering.sponsor_name}의 ${offering.menu}`,
+        `   "${offering.comment}"`,
+      ].join("\n");
+
+      const link = document.getElementById("offering-link");
+      if (offering.link) { link.href = offering.link; link.classList.remove("hidden"); }
+      else { link.removeAttribute("href"); link.classList.add("hidden"); }
+
+      section.classList.remove("hidden");
     }
 
     // ===== 이벤트 =====
@@ -206,6 +244,7 @@
         if (!res.ok) {
           // 이전 결과가 남아 있으면 오류와 헷갈리므로 숨김
           document.getElementById("result").classList.add("hidden");
+          document.getElementById("offering").classList.add("hidden");
           // 400: 서버 날짜 검증 메시지(문자열), 422: 형식 오류(배열)
           errorEl.textContent = typeof data.detail === "string" ? data.detail : "생년월일 형식을 확인해 주시게";
           return;

@@ -8,7 +8,8 @@ POST /api/bapgwae — 밥괘 생성 (핸드오프 4-2장 처리 흐름)
 4) 오행 관계로 처방 타입 결정
 5) 캐시 조회 (일간, KST 날짜, 끼니)
 6) Gemini 호출 → 실패 시 fallback
-7) 캐시 저장 (KST 자정 만료) — 단, fallback 결과는 저장하지 않음 (아래 _resolve_result 참고)
+6-1) 공양 슬롯: 밥괘 확정 후 광고 선택(코드) + 식신 멘트(LLM 별도 호출, 실패 시 고정 문구)
+7) 캐시 저장 (KST 자정 만료) — 밥괘 + 공양을 함께 저장. 단, fallback 결과는 저장하지 않음
 """
 import logging
 from datetime import date, datetime
@@ -16,10 +17,11 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 
-from app.schemas import BapgwaeContext, BapgwaeRequest, BapgwaeResponse, BapgwaeResult
+from app.schemas import BapgwaeContext, BapgwaeRequest, BapgwaeResponse, BapgwaeResult, Offering
 from app.services import llm
 from app.services.cache import make_key, result_cache
 from app.services.fallback import build_fallback_result
+from app.services.offering import build_offering, fallback_comment, select_offering_slot
 from app.services.manseryeok import InvalidDateError, get_iljin, get_ilgan, lunar_to_solar
 from app.services.ohaeng import gan_to_ohaeng, get_avoid_ohaeng, get_prescription
 from app.services.time_util import MEAL_LABELS, detect_meal, now_kst
@@ -88,12 +90,35 @@ def build_context(req: BapgwaeRequest, now: datetime) -> BapgwaeContext:
     )
 
 
+def _resolve_offering(ctx: BapgwaeContext, bapgwae_menu: str, use_llm: bool) -> Optional[Offering]:
+    """
+    공양 슬롯을 만든다 (핸드오프 11-3장). 밥괘가 확정된 뒤에 호출된다.
+
+    - 광고 선택/표기/링크: 코드 (select_offering_slot)
+    - 식신 멘트: use_llm이면 LLM 별도 호출, 실패하거나 LLM 미사용이면 고정 문구
+    - 멘트 실패는 밥괘 결과에 영향을 주지 않는다 (밥괘는 LLM 결과 그대로 유지)
+    """
+    slot = select_offering_slot(ctx)
+    if slot is None:
+        return None
+
+    comment = None
+    if use_llm:
+        try:
+            comment = llm.generate_offering_comment(slot, ctx, bapgwae_menu)
+        except llm.LLMError as e:
+            logger.warning("공양 멘트 LLM 실패 → 고정 문구 사용: %s", e)
+    return build_offering(slot, comment or fallback_comment(slot, ctx))
+
+
 def _resolve_result(ctx: BapgwaeContext, now: datetime) -> tuple:
     """
     캐시 → LLM → fallback 순으로 결과를 얻는다. (4-2장 5~7단계)
 
     Returns:
-        (BapgwaeResult, is_fallback, is_cached)
+        (BapgwaeResult, Optional[Offering], is_fallback, is_cached)
+
+    캐시 값은 (밥괘 결과, 공양) 묶음. 공양 선택도 (일간, 날짜, 끼니)로 결정되므로 같은 키에 함께 고정한다.
 
     fallback 결과를 캐시에 넣지 않는 이유
     - LLM이 일시적으로 실패했을 때 fallback이 캐시되면 그날 자정까지 fallback으로 고정된다.
@@ -105,19 +130,25 @@ def _resolve_result(ctx: BapgwaeContext, now: datetime) -> tuple:
     # 5) 캐시 조회
     cached = result_cache.get(key, now)
     if cached is not None:
-        return cached, False, True
+        result, offering = cached
+        return result, offering, False, True
 
     # 6) LLM 호출 (키 미설정이면 바로 fallback)
     if llm.is_enabled():
         try:
             result = llm.generate_bapgwae(ctx)
-            # 7) 캐시 저장. 동시 요청으로 이미 저장된 값이 있으면 그 값을 사용
-            stored = result_cache.set_if_absent(key, result, now)
-            return stored, False, stored is not result
         except llm.LLMError as e:
             logger.warning("LLM 실패 → fallback 사용: %s", e)
+        else:
+            # 6-1) 공양 슬롯 (밥괘 확정 후)
+            offering = _resolve_offering(ctx, result.menu, use_llm=True)
+            # 7) 캐시 저장. 동시 요청으로 이미 저장된 값이 있으면 그 값을 사용
+            value = (result, offering)
+            stored = result_cache.set_if_absent(key, value, now)
+            return stored[0], stored[1], False, stored is not value
 
-    return build_fallback_result(ctx), True, False
+    result = build_fallback_result(ctx)
+    return result, _resolve_offering(ctx, result.menu, use_llm=False), True, False
 
 
 def create_bapgwae(req: BapgwaeRequest, now: Optional[datetime] = None) -> BapgwaeResponse:
@@ -126,13 +157,15 @@ def create_bapgwae(req: BapgwaeRequest, now: Optional[datetime] = None) -> Bapgw
     """
     current = now_kst(now)
     ctx = build_context(req, current)
-    result, is_fallback, is_cached = _resolve_result(ctx, current)
+    result, offering, is_fallback, is_cached = _resolve_result(ctx, current)
 
     # 요청 로그: 생년월일 원본은 남기지 않고 파생값만 기록 (개인정보 최소화)
     logger.info(
-        "bapgwae date=%s meal=%s ilgan=%s iljin=%s type=%s target=%s menu=%s fallback=%s cached=%s",
+        "bapgwae date=%s meal=%s ilgan=%s iljin=%s type=%s target=%s menu=%s offering=%s fallback=%s cached=%s",
         ctx.today, ctx.meal, ctx.my_ilgan, ctx.today_iljin, ctx.prescription_type,
-        ctx.target_ohaeng, result.menu, is_fallback, is_cached,
+        ctx.target_ohaeng, result.menu,
+        f"{offering.sponsor_name}(demo={offering.is_demo})" if offering else None,
+        is_fallback, is_cached,
     )
 
     return BapgwaeResponse(
@@ -145,7 +178,7 @@ def create_bapgwae(req: BapgwaeRequest, now: Optional[datetime] = None) -> Bapgw
         prescription_type=ctx.prescription_type,
         target_ohaeng=ctx.target_ohaeng,
         result=result,
-        offering=None,  # MVP: 공양 슬롯 미노출 (핸드오프 11-3장)
+        offering=offering,  # 노출할 광고가 없으면 None (OFFERING_DEMO 꺼짐 + 실제 광고주 없음)
         is_fallback=is_fallback,
         is_cached=is_cached,
     )

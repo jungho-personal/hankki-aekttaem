@@ -30,6 +30,16 @@ MEAL_LABELS = {key: label for key, label, _ in MEALS}
 # 허용되는 끼니 키 목록
 MEAL_KEYS = [key for key, _, _ in MEALS]
 
+# 끼니별 톤 / 메뉴 성격 (핸드오프 3장 표 그대로) — LLM 프롬프트에 넘겨 끼니마다 메뉴가 갈리게 한다
+MEAL_GUIDE = {
+    "breakfast": {"tone": "하루 기운 여는", "menu_style": "가볍고 따뜻한 것"},
+    "brunch": {"tone": "게으름 용서", "menu_style": "브런치, 간단식"},
+    "lunch": {"tone": "오후 버티기", "menu_style": "정식, 면, 덮밥"},
+    "snack": {"tone": "당 충전", "menu_style": "디저트, 분식"},
+    "dinner": {"tone": "하루 액땜 마무리", "menu_style": "고기, 찌개, 안주"},
+    "late_night": {"tone": "죄책감 사면", "menu_style": "배달 야식류"},
+}
+
 
 def now_kst(now: Optional[datetime] = None) -> datetime:
     """

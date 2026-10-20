@@ -16,8 +16,9 @@ from typing import Optional
 
 from pydantic import ValidationError
 
-from app.schemas import BapgwaeContext, BapgwaeResult
+from app.schemas import BapgwaeContext, BapgwaeResult, OfferingCommentOutput, OfferingSlot
 from app.services.ohaeng import OHAENG_ATTR, label
+from app.services.time_util import MEAL_GUIDE
 
 logger = logging.getLogger("hankki.llm")
 
@@ -85,6 +86,7 @@ SYSTEM_INSTRUCTION = """\
 
 규칙
 1. 메뉴는 해당 끼니에 한국에서 대중적으로 사 먹을 수 있는 메뉴 1개만 고른다.
+   반드시 입력의 "끼니 메뉴 성격"에 맞는 메뉴를 고른다. (예: 저녁이면 고기/찌개/안주류, 간식이면 디저트/분식류)
 2. 대상 오행의 "색" 또는 "맛" 중 하나를 골라, 메뉴 자체가 그 기준을 만족해야 한다. 둘 다 만족해도 된다.
    고른 기준을 chosen_basis에 "color" 또는 "taste"로 적는다.
 3. basis_comment는 반드시 이 형식을 따른다:
@@ -98,7 +100,7 @@ SYSTEM_INSTRUCTION = """\
    - 부스트: "[메뉴]로 [부족한 기운]을 끌어올리시게"
    - 보양: "[메뉴]로 [본래 기운]을 든든히 채우시게"
 7. lucky_side_dish: 대상 오행과 어울리는 흔한 반찬 1개.
-8. avoid_menu: "피해야 할 오행"의 색 또는 맛에 해당하는, 같은 끼니의 대중 메뉴 1개. avoid_reason은 식신 말투 한 줄.
+8. avoid_menu: "피해야 할 오행"의 색 또는 맛에 해당하는, 같은 끼니(같은 메뉴 성격)의 대중 메뉴 1개. avoid_reason은 식신 말투 한 줄.
 9. 과도한 비하/혐오 표현 금지. 의학적/건강 효능을 단정하는 표현 금지.
 10. 모든 값은 한국어로, 각 문장은 한두 줄 이내로 짧게.
 """
@@ -108,10 +110,11 @@ def build_prompt(ctx: BapgwaeContext) -> str:
     """컨텍스트(서버 계산값)를 LLM 입력 텍스트로 만든다 (핸드오프 7장 입력값)"""
     target_attr = OHAENG_ATTR[ctx.target_ohaeng]
     avoid_attr = OHAENG_ATTR[ctx.avoid_ohaeng]
+    meal_guide = MEAL_GUIDE[ctx.meal]
     return f"""\
 오늘의 밥괘를 내려주시게.
 
-- 끼니: {ctx.meal_label}
+- 끼니: {ctx.meal_label} (톤: {meal_guide['tone']}, 끼니 메뉴 성격: {meal_guide['menu_style']})
 - 사용자 일간 오행(본래 기운): {label(ctx.my_ohaeng)}
 - 오늘 일진: {ctx.today_iljin}일, 오늘 일진 오행: {label(ctx.today_ohaeng)}
 - 처방 타입: {ctx.prescription_type}
@@ -120,12 +123,12 @@ def build_prompt(ctx: BapgwaeContext) -> str:
 """
 
 
-def generate_bapgwae(ctx: BapgwaeContext) -> BapgwaeResult:
+def _call_json(system_instruction: str, prompt: str, schema) -> str:
     """
-    Gemini로 밥괘 결과를 생성한다.
+    Gemini를 JSON 스키마 고정 모드로 호출하고 응답 텍스트를 반환한다. (밥괘/공양 멘트 공통)
 
     Raises:
-        LLMError: 키 미설정, 네트워크/한도 초과/타임아웃, JSON 스키마 불일치 등 모든 실패
+        LLMError: 키 미설정, 네트워크/한도 초과/타임아웃 등 호출 실패
     """
     if not is_enabled():
         raise LLMError("GEMINI_API_KEY 미설정")
@@ -135,17 +138,27 @@ def generate_bapgwae(ctx: BapgwaeContext) -> BapgwaeResult:
 
         response = _get_client().models.generate_content(
             model=get_model_name(),
-            contents=build_prompt(ctx),
+            contents=prompt,
             config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_INSTRUCTION,
+                system_instruction=system_instruction,
                 response_mime_type="application/json",
-                response_schema=BapgwaeResult,  # JSON 출력 스키마 고정
+                response_schema=schema,  # JSON 출력 스키마 고정
             ),
         )
     except Exception as e:  # SDK 예외 종류가 다양해서 전부 fallback 신호로 변환
         raise LLMError(f"Gemini 호출 실패: {type(e).__name__}: {e}") from e
 
-    return parse_response_text(response.text)
+    return response.text
+
+
+def generate_bapgwae(ctx: BapgwaeContext) -> BapgwaeResult:
+    """
+    Gemini로 밥괘 결과를 생성한다.
+
+    Raises:
+        LLMError: 키 미설정, 네트워크/한도 초과/타임아웃, JSON 스키마 불일치 등 모든 실패
+    """
+    return parse_response_text(_call_json(SYSTEM_INSTRUCTION, build_prompt(ctx), BapgwaeResult))
 
 
 def parse_response_text(text: Optional[str]) -> BapgwaeResult:
@@ -165,3 +178,54 @@ def parse_response_text(text: Optional[str]) -> BapgwaeResult:
     if empty:
         raise LLMError(f"Gemini 응답에 빈 필드: {empty}")
     return result
+
+
+# ===== 공양 멘트 (핸드오프 11-3장: LLM은 comment만 생성) =====
+# 밥괘와 별도 호출로 분리한 이유: 밥괘 메뉴가 먼저 확정된 뒤에 광고 정보를 넘기므로
+# 광고가 밥괘 메뉴 선택에 섞여 들어갈 여지가 없다 ("밥괘와 공양 슬롯 완전 분리" 원칙).
+OFFERING_SYSTEM_INSTRUCTION = """\
+너는 "식신(食神)"이다. 노인 도사 말투("~하시게", "~구먼", "~다네")를 쓴다.
+오늘 너에게 공양(광고비)을 올린 가게가 있어서, 밥괘와는 별개로 그 가게 메뉴를 "대안"으로 가볍게 권하는 멘트를 한다.
+
+규칙
+1. comment는 한두 문장, 60자 이내로 짧게.
+2. 가게 이름과 메뉴는 입력에 주어진 그대로만 쓴다. 다른 가게나 메뉴를 지어내지 않는다.
+3. 공양을 받았다는 사실을 숨기지 않고 능청스럽게 드러낸다.
+   예) "흠, 공양이 정성스러우니 밥괘가 영 내키지 않거든 이 집도 한번 맛보시게~"
+   예) "공양을 받았으니 모른 척할 수가 없구먼. ○○도 괜찮다네~"
+   예) "식신도 먹고살아야 하지 않겠는가. ○○ 한번 들러보시게~"
+4. 공양 메뉴가 오늘 운이나 오행에 맞는다고 주장하지 않는다. 밥괘 메뉴보다 낫다고 하지 않는다.
+5. 의학적/건강 효능 단정 금지. 비하/혐오 표현 금지.
+6. "[광고]" 같은 표기 문구는 쓰지 않는다 (화면에서 따로 붙인다).
+"""
+
+
+def build_offering_prompt(slot: OfferingSlot, ctx: BapgwaeContext, bapgwae_menu: str) -> str:
+    """공양 멘트 입력 텍스트. 밥괘 메뉴는 이미 확정된 값을 참고로만 넘긴다."""
+    return f"""\
+공양 멘트를 내려주시게.
+
+- 끼니: {ctx.meal_label}
+- 오늘의 밥괘 메뉴(이미 확정됨, 바꾸지 말 것): {bapgwae_menu}
+- 공양 올린 가게: {slot.sponsor_name}
+- 공양 메뉴: {slot.menu}
+"""
+
+
+def generate_offering_comment(slot: OfferingSlot, ctx: BapgwaeContext, bapgwae_menu: str) -> str:
+    """
+    공양 슬롯 식신 멘트를 생성한다.
+
+    Raises:
+        LLMError: 호출 실패, 스키마 불일치, 빈 멘트
+    """
+    text = _call_json(OFFERING_SYSTEM_INSTRUCTION, build_offering_prompt(slot, ctx, bapgwae_menu), OfferingCommentOutput)
+    if not text:
+        raise LLMError("공양 멘트 응답이 비어 있음")
+    try:
+        comment = OfferingCommentOutput.model_validate_json(text).comment.strip()
+    except ValidationError as e:
+        raise LLMError(f"공양 멘트 스키마 불일치: {e}") from e
+    if not comment:
+        raise LLMError("공양 멘트가 빈 문자열")
+    return comment
