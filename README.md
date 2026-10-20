@@ -91,7 +91,8 @@ GEMINI_API_KEY=발급받은키 .venv/bin/uvicorn app.main:app --reload
 ### 현재 배포 (2026-10-20)
 - URL: https://hankki-web-production.up.railway.app
 - Railway 프로젝트 `hankki-aekttaem` / 서비스 `hankki-web` / 환경 `production`
-- 이 폴더는 CLI로 위 서비스에 링크돼 있어서, 재배포는 아래 명령 한 줄이면 돼
+- **GitHub `main`에 push하면 자동 재배포돼** (서비스 Source = `jungho-personal/hankki-aekttaem`, branch `main`)
+- push 없이 로컬 파일을 바로 올려보고 싶을 때는 CLI로도 가능해 (이 폴더가 서비스에 링크돼 있음)
 ```bash
 railway up --ci --service hankki-web
 ```
