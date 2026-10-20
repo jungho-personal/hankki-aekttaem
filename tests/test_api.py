@@ -52,7 +52,8 @@ def test_health_without_key():
 def test_static_index_served():
     res = client.get("/")
     assert res.status_code == 200
-    assert "오늘의 밥괘는" in res.text
+    # 본문 문구는 디자인 마크업(<span> 등)에 따라 쪼개질 수 있어 <title>로 확인
+    assert "<title>한끼액땜" in res.text
 
 
 def test_fallback_mode_without_key():
