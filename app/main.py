@@ -6,6 +6,7 @@ FastAPI 앱 진입점 (핸드오프 5-1장: Railway 서비스 1개에서 정적 
     Railway: uvicorn app.main:app --host 0.0.0.0 --port $PORT
 """
 import logging
+import mimetypes
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -17,6 +18,11 @@ from app.services import llm
 # ===== 로깅 =====
 # Railway는 stdout을 로그로 수집하므로 기본 핸들러로 충분
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+# ===== MIME =====
+# 서버(Linux) Python 3.10의 mimetypes에는 .webp가 없어 application/octet-stream으로 나가고,
+# 그러면 브라우저가 이미지를 그리지 않는다 → 직접 등록
+mimetypes.add_type("image/webp", ".webp")
 
 # ===== 경로 =====
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
