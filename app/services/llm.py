@@ -22,8 +22,12 @@ from app.services.ohaeng import OHAENG_ATTR, label
 logger = logging.getLogger("hankki.llm")
 
 # ===== 설정 기본값 =====
-# 기본 모델명은 워크숍 당일 AI Studio 표시 모델로 GEMINI_MODEL을 덮어쓰는 걸 전제로 둔 값
-DEFAULT_MODEL = "gemini-2.5-flash"
+# 기본 모델: gemini-3.5-flash-lite (2026-10-20 사용자 확정)
+# - 공식 문서상 새 프로젝트 권장 모델 중 하나, Stable
+# - 기본 thinking이 minimal이라 응답이 빠름 (시연/타임아웃 유리)
+# - 단가 입력 $0.30 / 출력 $2.50 per 1M → 하루 상한 60회 기준 월 약 8천원 이내 (추정)
+# 다른 모델을 쓰려면 코드 수정 없이 GEMINI_MODEL 환경변수로 덮어쓴다
+DEFAULT_MODEL = "gemini-3.5-flash-lite"
 DEFAULT_TIMEOUT_SEC = 15
 
 # ===== 클라이언트 (최초 호출 시 1회 생성) =====

@@ -54,7 +54,7 @@ GEMINI_API_KEY=발급받은키 .venv/bin/uvicorn app.main:app --reload
 
 ### `GET /api/health`
 ```json
-{"status": "ok", "llm_enabled": false, "model": "gemini-2.5-flash"}
+{"status": "ok", "llm_enabled": false, "model": "gemini-3.5-flash-lite"}
 ```
 `llm_enabled`로 키가 적용됐는지 확인할 수 있어. 키 값 자체는 노출하지 않아.
 
@@ -77,7 +77,7 @@ GEMINI_API_KEY=발급받은키 .venv/bin/uvicorn app.main:app --reload
 | 변수 | 필수 | 설명 |
 |---|---|---|
 | `GEMINI_API_KEY` | X | 없으면 fallback 모드 |
-| `GEMINI_MODEL` | X | 모델명. 비우면 `gemini-2.5-flash` (**기본값은 미검증이라 당일 AI Studio에서 확인 후 설정**) |
+| `GEMINI_MODEL` | X | 모델명. 비우면 `gemini-3.5-flash-lite` (2026-10-20 확정. 실제 호출은 키 설정 후 확인 필요) |
 | `GEMINI_TIMEOUT_SEC` | X | Gemini 호출 타임아웃(초), 기본 15. 넘으면 fallback |
 | `PORT` | Railway가 주입 | 직접 설정하지 않음 |
 
