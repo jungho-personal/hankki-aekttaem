@@ -2,89 +2,508 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <!-- viewport: 모바일 최적화 (핸드오프 11-2장 보상형 광고 조건이기도 함) -->
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f3ead6">
   <title>한끼액땜 - 오늘의 밥괘</title>
   <!--
-    기본 프론트 뼈대 (핸드오프 12-2장 4단계)
-    - 기능만 동작하는 최소 버전. 디자인은 워크숍 현장에서 AI로 교체한다.
-    - 의존성 없음 (순수 HTML/CSS/JS). API: POST /api/bapgwae (같은 서버라 CORS 불필요)
+    한끼액땜 프론트 (단일 파일, 의존성 없음)
+    - API: POST /api/bapgwae (같은 서버라 상대 경로, CORS/키 불필요)
+    - API 응답 문자열은 전부 textContent로만 넣는다 (LLM 생성 문구가 HTML로 해석되면 안 됨)
+    - 캐릭터 이미지: static/img/ 의 WebP 중 박사 1장 + 식신(선녀) 1장을 세션마다 랜덤 선택
   -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=Gowun+Dodum&display=swap" rel="stylesheet">
   <style>
-    /* ===== 최소 스타일 (워크숍에서 교체) ===== */
-    body { font-family: system-ui, -apple-system, sans-serif; max-width: 480px; margin: 0 auto; padding: 16px; line-height: 1.6; }
-    h1 { font-size: 1.5rem; margin-bottom: 4px; }
-    fieldset { border: 1px solid #ccc; border-radius: 8px; margin: 12px 0; }
-    .birth-inputs input { width: 5em; }
-    .meal-tabs button { margin: 2px; padding: 6px 10px; border: 1px solid #999; border-radius: 16px; background: #fff; cursor: pointer; }
-    .meal-tabs button.active { background: #333; color: #fff; }
-    .cta { width: 100%; padding: 12px; font-size: 1.1rem; margin-top: 8px; cursor: pointer; }
-    .hidden { display: none; }
-    .error { color: #c00; }
-    #result { border: 1px solid #ccc; border-radius: 8px; padding: 12px; margin-top: 16px; white-space: pre-line; }
-    /* 공양 슬롯: 광고 표기는 구분되는 색/굵은 글씨로 (핸드오프 11-3장 표기 규칙) */
-    #offering { border: 1px dashed #b8860b; border-radius: 8px; padding: 12px; margin-top: 12px; }
-    #offering-body { white-space: pre-line; margin: 8px 0 0; }
-    .ad-label { display: inline-block; background: #b8860b; color: #fff; font-weight: bold; padding: 0 6px; border-radius: 4px; margin-right: 6px; }
-    .ad-disclosure { font-weight: bold; color: #8a6d00; }
-    footer { margin-top: 32px; font-size: 0.9rem; color: #666; border-top: 1px solid #eee; padding-top: 12px; }
+    /* ===== 색/토큰: 캐릭터 일러스트(아이보리·밤색·금장·주황 띠·옥색)에서 뽑은 팔레트 ===== */
+    :root {
+      color-scheme: light;
+      --hanji: #f3ead6;          /* 한지 바탕 */
+      --paper: #fffaf0;          /* 카드 종이 */
+      --ink: #3b2a1e;            /* 먹/밤색 글씨 */
+      --ink-soft: #6e5844;
+      --gold: #c9963b;           /* 금장 */
+      --gold-soft: #ead9b0;
+      --cinnabar: #c0392b;       /* 부적 주사(朱砂) 빨강 */
+      --cinnabar-deep: #9b2a1f;
+      --talisman: #fbeebd;       /* 부적 노랑 */
+      --ribbon: #e0793a;         /* 선녀 옷고름 주황 */
+      --jade: #5c7a52;           /* 옥색 */
+      --jade-soft: #e6eedf;
+      --shadow: 0 6px 20px rgba(91, 62, 30, .12), 0 1px 3px rgba(91, 62, 30, .10);
+      --radius: 20px;
+      --serif: "Gowun Batang", "Nanum Myeongjo", serif;
+      --sans: "Gowun Dodum", system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { -webkit-text-size-adjust: 100%; }
+    body {
+      margin: 0;
+      font-family: var(--sans);
+      color: var(--ink);
+      line-height: 1.65;
+      word-break: keep-all;
+      overflow-wrap: anywhere;
+      /* 한지 결: 노이즈 SVG + 은은한 얼룩 */
+      background-color: var(--hanji);
+      background-image:
+        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .45  0 0 0 0 .33  0 0 0 0 .18  0 0 0 .07 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"),
+        radial-gradient(ellipse at 15% 0%, rgba(224, 121, 58, .10), transparent 55%),
+        radial-gradient(ellipse at 100% 30%, rgba(92, 122, 82, .10), transparent 50%),
+        radial-gradient(ellipse at 0% 100%, rgba(201, 150, 59, .12), transparent 55%);
+      background-attachment: fixed;
+      min-height: 100vh;
+    }
+    button, input { font: inherit; color: inherit; }
+    .hidden { display: none !important; }
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+    }
+
+    .wrap { max-width: 480px; margin: 0 auto; padding: 0 16px 24px; }
+
+    /* ===== 상단 로고 띠 ===== */
+    .brand {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      padding: 14px 0 4px;
+      font-family: var(--serif); font-weight: 700; letter-spacing: .18em;
+      color: var(--cinnabar-deep); font-size: .95rem;
+    }
+    .brand::before, .brand::after {
+      content: ""; height: 1px; width: 36px;
+      background: linear-gradient(90deg, transparent, var(--gold));
+    }
+    .brand::after { transform: scaleX(-1); }
+
+    /* ===== 히어로: 식신 + 쩝쩝박사 무대 ===== */
+    .hero { text-align: center; }
+    .stage { position: relative; height: 288px; margin: 4px -8px 0; }
+    .stage .halo {
+      position: absolute; right: 6px; top: 6px; width: 230px; height: 230px; border-radius: 50%;
+      background:
+        radial-gradient(circle, rgba(255, 246, 214, .95) 0 52%, rgba(234, 217, 176, .55) 53% 54%, transparent 55% 62%, rgba(201, 150, 59, .35) 63% 63.6%, transparent 64.5%);
+    }
+    .stage img { position: absolute; display: block; height: auto; user-select: none; -webkit-user-drag: none; }
+    /* 상반신 그림은 프레임 가장자리에서 잘려 있어 직선이 보임 → 아래·왼쪽 가장자리를 흐리게 (전신 그림은 원래 투명이라 영향 없음) */
+    .stage img, .loading img {
+      -webkit-mask-image: linear-gradient(to bottom, #000 80%, transparent), linear-gradient(to right, transparent, #000 10%);
+      -webkit-mask-composite: source-in;
+      mask-image: linear-gradient(to bottom, #000 80%, transparent), linear-gradient(to right, transparent, #000 10%);
+      mask-composite: intersect;
+    }
+    .stage .sinsin {
+      right: -8px; top: 0; width: 252px;
+      filter: drop-shadow(0 8px 14px rgba(91, 62, 30, .18));
+      animation: float 5s ease-in-out infinite;
+    }
+    .stage .doctor {
+      left: -4px; bottom: -6px; width: 178px;
+      filter: drop-shadow(0 6px 10px rgba(91, 62, 30, .22));
+      transform-origin: 50% 100%;
+      animation: bob 2.6s ease-in-out infinite;
+    }
+    /* 박사의 말풍선 (지역별 인사) */
+    .bubble {
+      position: absolute; left: 6px; top: 10px; z-index: 2;
+      max-width: 188px; min-height: 64px;
+      padding: 10px 14px;
+      background: var(--paper);
+      border: 2px solid var(--ink); border-radius: 18px;
+      box-shadow: 3px 3px 0 var(--ink);
+      font-family: var(--serif); font-weight: 700; font-size: .95rem; line-height: 1.45;
+      text-align: left;
+      display: flex; align-items: center;
+    }
+    .bubble::after {
+      content: ""; position: absolute; left: 44px; bottom: -11px;
+      width: 16px; height: 16px; background: var(--paper);
+      border-right: 2px solid var(--ink); border-bottom: 2px solid var(--ink);
+      transform: rotate(45deg) skew(8deg, 8deg);
+    }
+    .bubble-text { transition: opacity .35s ease, transform .35s ease; }
+    .bubble-text.out { opacity: 0; transform: translateY(-4px); }
+
+    .tagline {
+      display: inline-block; margin: 14px 0 2px; padding: 2px 12px;
+      font-size: .8rem; letter-spacing: .08em; color: var(--jade);
+      border: 1px solid rgba(92, 122, 82, .45); border-radius: 999px; background: rgba(255, 255, 255, .5);
+    }
+    h1 {
+      margin: 6px 0 2px;
+      font-family: var(--serif); font-weight: 700;
+      font-size: clamp(1.7rem, 7.6vw, 2.05rem); line-height: 1.25; letter-spacing: -.01em;
+    }
+    h1 .accent { color: var(--cinnabar); }
+    .sub { margin: 0 0 18px; color: var(--ink-soft); font-size: .95rem; }
+
+    /* ===== 공통 카드 ===== */
+    .card {
+      position: relative;
+      background: var(--paper);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 20px 18px;
+    }
+
+    /* ===== 입력 폼 ===== */
+    .form-card { border-top: 5px solid var(--cinnabar); }
+    .field + .field { margin-top: 20px; }
+    .field-title {
+      display: flex; align-items: baseline; gap: 6px; margin: 0 0 10px;
+      font-family: var(--serif); font-weight: 700; font-size: 1.02rem;
+    }
+    .field-title small { font-family: var(--sans); font-weight: 400; font-size: .78rem; color: var(--ink-soft); }
+    fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+
+    .birth { display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 8px; }
+    .birth label { position: relative; display: block; }
+    .birth input {
+      width: 100%; height: 52px;
+      padding: 0 30px 0 12px;
+      font-size: 1.15rem; text-align: center; font-variant-numeric: tabular-nums;
+      background: #fff; border: 1.5px solid var(--gold-soft); border-radius: 14px;
+      outline: none; transition: border-color .15s, box-shadow .15s;
+      -moz-appearance: textfield; appearance: textfield;
+    }
+    .birth input::placeholder { color: #c4b49b; }
+    .birth input:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(201, 150, 59, .22); }
+    .birth input[aria-invalid="true"] { border-color: var(--cinnabar); }
+    .birth .unit {
+      position: absolute; right: 11px; top: 50%; transform: translateY(-50%);
+      font-size: .85rem; color: var(--ink-soft); pointer-events: none;
+    }
+
+    .cal-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 10px; }
+    .segment {
+      display: inline-grid; grid-template-columns: 1fr 1fr;
+      padding: 4px; border-radius: 999px; background: #f1e7d2;
+    }
+    .segment label { position: relative; cursor: pointer; }
+    .segment input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+    .segment span {
+      display: block; padding: 6px 18px; border-radius: 999px;
+      font-size: .95rem; color: var(--ink-soft); transition: background .15s, color .15s;
+    }
+    .segment input:checked + span { background: var(--ink); color: var(--paper); font-weight: 700; }
+    .segment input:focus-visible + span { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+    .leap { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: .95rem; }
+    .leap input { width: 18px; height: 18px; accent-color: var(--cinnabar); margin: 0; }
+
+    .meal-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .meal-tabs button {
+      height: 46px; padding: 0 4px;
+      border: 1.5px solid var(--gold-soft); border-radius: 14px;
+      background: #fff; cursor: pointer;
+      font-size: .98rem; white-space: nowrap;
+      transition: background .15s, color .15s, border-color .15s, transform .1s;
+    }
+    .meal-tabs button:active { transform: scale(.97); }
+    .meal-tabs button[aria-pressed="true"] {
+      background: var(--ink); color: var(--paper); border-color: var(--ink);
+      box-shadow: 0 0 0 3px rgba(201, 150, 59, .35);
+      font-weight: 700;
+    }
+    .meal-tabs button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+    .cta {
+      display: block; width: 100%; margin-top: 22px;
+      height: 58px; border: 0; border-radius: 16px; cursor: pointer;
+      font-family: var(--serif); font-weight: 700; font-size: 1.12rem; letter-spacing: .02em;
+      color: #fff7e2;
+      background: linear-gradient(180deg, #d24a35, var(--cinnabar-deep));
+      box-shadow: inset 0 0 0 2px rgba(255, 220, 150, .55), inset 0 0 0 5px var(--cinnabar-deep), inset 0 0 0 6px rgba(255, 220, 150, .35), 0 6px 14px rgba(155, 42, 31, .3);
+      transition: transform .1s, filter .15s;
+    }
+    .cta:active { transform: translateY(1px); }
+    .cta:disabled { cursor: progress; filter: saturate(.55) brightness(1.05); }
+    .cta:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
+
+    .error {
+      margin: 14px 0 0; padding: 10px 14px;
+      border-radius: 12px; background: #fde9e4; color: var(--cinnabar-deep);
+      font-weight: 700; font-size: .95rem;
+    }
+    .error:empty { display: none; }
+
+    /* 로딩: 박사가 침 흘리며 기다림 */
+    .loading {
+      display: flex; align-items: center; gap: 10px;
+      margin-top: 14px; padding: 8px 12px 8px 6px;
+      border-radius: 14px; background: var(--talisman);
+      font-family: var(--serif); font-weight: 700; color: var(--ink);
+    }
+    .loading img { width: 64px; height: 64px; flex: none; animation: bob 1s ease-in-out infinite; }
+    .loading small { display: block; font-family: var(--sans); font-weight: 400; font-size: .8rem; color: var(--ink-soft); }
+    .dots::after { content: ""; animation: dots 1.4s steps(4, end) infinite; }
+
+    /* ===== 결과: 부적 카드 ===== */
+    .result {
+      background:
+        linear-gradient(var(--talisman), var(--talisman)) padding-box;
+      border: 2px solid var(--cinnabar);
+      outline: 1px solid var(--cinnabar); outline-offset: -8px;
+      padding: 26px 20px 22px;
+      margin-top: 8px;
+    }
+    .seal {
+      position: absolute; right: 16px; top: -14px;
+      width: 52px; height: 52px; display: grid; place-items: center;
+      background: var(--cinnabar); color: #fff4e0;
+      font-family: var(--serif); font-weight: 700; font-size: 1.05rem; line-height: 1.05; text-align: center;
+      border-radius: 6px; transform: rotate(8deg);
+      box-shadow: inset 0 0 0 2px #fff4e0, inset 0 0 0 4px var(--cinnabar), 0 3px 8px rgba(155, 42, 31, .35);
+    }
+    .reveal-head { text-align: center; }
+    .reveal-head .avatar {
+      width: 132px; height: 132px; margin: 0 auto -6px; position: relative;
+      border-radius: 50%; overflow: hidden;
+      background: radial-gradient(circle, #fff6d9 0 58%, rgba(201, 150, 59, .45) 59% 60%, transparent 61%);
+    }
+    .reveal-head .avatar img { width: 100%; height: 100%; object-fit: contain; display: block; }
+    .reveal-title { margin: 6px 0 0; font-family: var(--serif); font-weight: 700; font-size: 1.05rem; color: var(--cinnabar-deep); }
+
+    .menu-block { margin: 18px 0 6px; text-align: center; }
+    .menu-label { font-size: .92rem; color: var(--ink-soft); }
+    .menu-name {
+      margin: 2px 0 0;
+      font-family: var(--serif); font-weight: 700;
+      font-size: clamp(1.9rem, 9vw, 2.4rem); line-height: 1.2;
+      color: var(--ink);
+    }
+    .menu-name::before, .menu-name::after { content: "〜"; color: var(--gold); font-size: .6em; vertical-align: middle; margin: 0 .3em; }
+    .iljin {
+      display: inline-block; margin-top: 8px; padding: 2px 10px;
+      border-radius: 999px; background: rgba(255, 255, 255, .6);
+      font-size: .78rem; color: var(--ink-soft);
+    }
+
+    .r-sec { margin-top: 16px; padding-top: 14px; border-top: 1px dashed rgba(192, 57, 43, .35); }
+    .r-row { display: flex; gap: 8px; }
+    .r-row > .emo { flex: none; width: 1.5em; text-align: center; }
+    .r-row > div { min-width: 0; flex: 1; }
+    .basis { font-weight: 700; }
+    .reason { margin: 4px 0 0; color: var(--ink-soft); font-size: .95rem; }
+
+    .oracle-title { margin: 0 0 6px; font-family: var(--serif); font-weight: 700; color: var(--cinnabar-deep); }
+    .oracle {
+      margin: 0; padding: 12px 14px;
+      font-family: var(--serif); font-size: 1rem; line-height: 1.8; white-space: pre-line;
+      background: rgba(255, 255, 255, .55); border-left: 3px solid var(--cinnabar); border-radius: 4px 12px 12px 4px;
+    }
+    .rx { margin: 0; font-weight: 700; font-size: 1.02rem; }
+    .rx-chip {
+      display: inline-block; margin-right: 6px; padding: 0 8px; border-radius: 6px;
+      background: var(--cinnabar); color: #fff4e0; font-size: .78rem; vertical-align: 2px;
+    }
+    .kv { margin: 0; }
+    .kv + .kv { margin-top: 8px; }
+    .kv b { font-family: var(--serif); }
+    .sign {
+      margin: 18px 0 0; text-align: center;
+      font-family: var(--serif); font-weight: 700; letter-spacing: .3em; color: var(--cinnabar-deep);
+    }
+
+    /* ===== 공양 슬롯 (광고): 결과와 확실히 구분되는 옥색 점선 카드 ===== */
+    .offering {
+      margin-top: 22px; padding: 16px 16px 18px;
+      background: var(--jade-soft);
+      border: 2px dashed var(--jade); border-radius: 16px;
+      box-shadow: none;
+    }
+    .ad-head { margin: 0 0 12px; font-size: .88rem; line-height: 1.5; }
+    .ad-label {
+      display: inline-block; margin-right: 6px; padding: 1px 8px;
+      background: #d4561b; color: #fff; font-weight: 700; border-radius: 6px;
+    }
+    .ad-disclosure { font-weight: 700; color: #a8410f; }
+    .offering-intro { margin: 0; font-family: var(--serif); font-weight: 700; }
+    .offering-item { margin: 8px 0 0 1.6em; font-weight: 700; font-size: 1.05rem; }
+    .offering-comment { margin: 4px 0 0 1.6em; color: var(--ink-soft); font-style: italic; }
+    .offering-link {
+      display: inline-flex; align-items: center; margin-top: 14px; padding: 8px 16px;
+      border-radius: 999px; background: var(--jade); color: #fff; text-decoration: none; font-weight: 700;
+    }
+    .offering-link:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+
+    .again {
+      display: block; width: 100%; margin-top: 22px; height: 52px;
+      border: 2px solid var(--ink); border-radius: 16px; background: var(--paper);
+      font-family: var(--serif); font-weight: 700; font-size: 1.02rem; cursor: pointer;
+      box-shadow: 3px 3px 0 var(--ink);
+    }
+    .again:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink); }
+    .again:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
+
+    /* ===== 푸터 ===== */
+    footer {
+      margin-top: 32px; padding: 18px 4px 8px;
+      border-top: 1px solid rgba(201, 150, 59, .45);
+      font-size: .88rem; color: var(--ink-soft); text-align: center;
+    }
+    footer p { margin: 0; }
+    footer p + p { margin-top: 8px; }
+    footer a { color: var(--cinnabar-deep); font-weight: 700; }
+    .disclaimer { font-size: .78rem; opacity: .85; }
+
+    /* ===== 애니메이션 ===== */
+    @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+    @keyframes bob { 0%, 100% { transform: rotate(-2deg); } 50% { transform: rotate(2deg) translateY(-2px); } }
+    @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
+    @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+    .rise { animation: rise .5s ease both; }
+    .rise-2 { animation-delay: .12s; }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+    }
+
+    /* 아주 좁은 화면(≤340px) 보정 */
+    @media (max-width: 340px) {
+      .stage { height: 250px; }
+      .stage .sinsin { width: 214px; }
+      .stage .halo { width: 196px; height: 196px; }
+      .stage .doctor { width: 150px; }
+      .bubble { max-width: 160px; font-size: .88rem; }
+      .meal-tabs button { font-size: .9rem; }
+    }
   </style>
 </head>
 <body>
-  <!-- ===== 랜딩 (핸드오프 2-1장) ===== -->
-  <header>
-    <h1>🍚 오늘의 밥괘는?!</h1>
-    <p>쩝쩝박사님도 궁금해 한다는 오늘의 밥괘!</p>
-    <p id="greeting"></p>
-  </header>
+  <div class="wrap">
+    <div class="brand">한끼액땜</div>
 
-  <!-- ===== 입력 폼 ===== -->
-  <form id="form">
-    <fieldset>
-      <legend>생년월일</legend>
-      <!-- 년/월/일을 따로 받는 이유: 음력엔 "2월 30일" 같은 날짜가 있어서 <input type="date">로는 입력 불가 -->
-      <div class="birth-inputs">
-        <input id="year" type="number" min="1900" max="2100" placeholder="1995" required> 년
-        <input id="month" type="number" min="1" max="12" placeholder="3" required> 월
-        <input id="day" type="number" min="1" max="31" placeholder="15" required> 일
-      </div>
-      <label><input type="radio" name="calendar" value="solar" checked> 양력</label>
-      <label><input type="radio" name="calendar" value="lunar"> 음력</label>
-      <!-- 윤달 토글: 음력일 때만 노출 -->
-      <label id="leap-wrap" class="hidden"><input id="leap" type="checkbox"> 윤달</label>
-    </fieldset>
+    <!-- ===== 1) 첫 화면 + 2) 입력 ===== -->
+    <main id="view-ask">
+      <header class="hero">
+        <div class="stage" aria-hidden="true">
+          <div class="halo"></div>
+          <img class="sinsin" data-char="sinsin" alt="" width="252" height="252" decoding="async">
+          <img class="doctor" data-char="doctor" alt="" width="178" height="178" decoding="async">
+          <div class="bubble"><span class="bubble-text" id="greeting"></span></div>
+        </div>
+        <span class="tagline">오늘 끼니, 팔자대로 드세요</span>
+        <h1><span aria-hidden="true">🍚</span> 오늘의 <span class="accent">밥괘</span>는?!</h1>
+        <p class="sub">쩝쩝박사님도 궁금해 한다는 오늘의 밥괘!</p>
+        <!-- 스크린리더용 인사 (말풍선은 aria-hidden 무대 안에 있음) -->
+        <p class="sr-only" id="greeting-sr"></p>
+      </header>
 
-    <fieldset>
-      <legend>끼니 <small id="meal-hint"></small></legend>
-      <div class="meal-tabs" id="meal-tabs"></div>
-    </fieldset>
+      <form class="card form-card" id="form" novalidate>
+        <fieldset class="field">
+          <legend class="field-title">생년월일 <small>태어난 날을 적어주시게</small></legend>
+          <!-- 년/월/일을 따로 받는 이유: 음력엔 "2월 30일" 같은 날짜가 있어서 <input type="date">로는 입력 불가 -->
+          <div class="birth">
+            <label>
+              <span class="sr-only">태어난 해</span>
+              <input id="year" aria-label="태어난 해" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="1995" autocomplete="bday-year">
+              <span class="unit" aria-hidden="true">년</span>
+            </label>
+            <label>
+              <span class="sr-only">태어난 달</span>
+              <input id="month" aria-label="태어난 달" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" placeholder="3" autocomplete="bday-month">
+              <span class="unit" aria-hidden="true">월</span>
+            </label>
+            <label>
+              <span class="sr-only">태어난 날</span>
+              <input id="day" aria-label="태어난 날" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="2" placeholder="15" autocomplete="bday-day">
+              <span class="unit" aria-hidden="true">일</span>
+            </label>
+          </div>
+          <div class="cal-row">
+            <div class="segment" role="radiogroup" aria-label="양력/음력">
+              <label><input type="radio" name="calendar" value="solar" checked><span>양력</span></label>
+              <label><input type="radio" name="calendar" value="lunar"><span>음력</span></label>
+            </div>
+            <!-- 윤달: 음력일 때만 노출 -->
+            <label class="leap hidden" id="leap-wrap"><input id="leap" type="checkbox"> 윤달</label>
+          </div>
+        </fieldset>
 
-    <button class="cta" type="submit" id="submit">🔮 식신께 밥괘 여쭙기</button>
-    <p class="error" id="error"></p>
-  </form>
+        <fieldset class="field">
+          <legend class="field-title">끼니 <small id="meal-hint"></small></legend>
+          <div class="meal-tabs" id="meal-tabs"></div>
+        </fieldset>
 
-  <!-- ===== 결과 (핸드오프 2-2장 템플릿) ===== -->
-  <section id="result" class="hidden"></section>
+        <button class="cta" type="submit" id="submit">🔮 식신께 밥괘 여쭙기</button>
 
-  <!-- ===== 공양 슬롯 (핸드오프 2-3장, 11-3장) — 밥괘 결과와 분리된 별도 영역 ===== -->
-  <!-- 광고 표기([광고]/[광고 예시] + disclosure)는 LLM이 아니라 프론트가 고정 렌더링 -->
-  <section id="offering" class="hidden">
-    <div><span class="ad-label" id="ad-label"></span><span class="ad-disclosure" id="ad-disclosure"></span></div>
-    <p id="offering-body"></p>
-    <a id="offering-link" class="hidden" target="_blank" rel="noopener sponsored">가게 보러 가기 →</a>
-  </section>
+        <div class="loading hidden" id="loading" role="status" aria-live="polite">
+          <img data-char="doctor" alt="" width="64" height="64" decoding="async">
+          <div>
+            <span>식신께서 점지 중<span class="dots" aria-hidden="true"></span></span>
+            <small>쩝쩝박사도 침 삼키며 기다리는 중이라네</small>
+          </div>
+        </div>
 
-  <!-- ===== 푸터 광고 문의 (핸드오프 2-1장, 11-3장 — MVP 포함) ===== -->
-  <footer>
-    🙏 식신께 공양을 올리고 싶은 사장님은 연락 주시게 →
-    <!-- TODO: 광고 문의 연락처(메일/폼 URL) 미정 -->
-    <a href="#" id="ad-inquiry">[광고 문의]</a>
-    <p>- 한끼액땜 - 재미로 보는 밥괘입니다.</p>
-  </footer>
+        <p class="error" id="error" role="alert"></p>
+      </form>
+    </main>
+
+    <!-- ===== 3) 결과 + 4) 공양 슬롯 ===== -->
+    <main id="view-result" class="hidden" aria-live="polite">
+      <section class="card result rise" id="result" tabindex="-1" aria-labelledby="reveal-title">
+        <div class="seal" aria-hidden="true">食<br>神</div>
+
+        <div class="reveal-head">
+          <div class="avatar"><img data-char="sinsin" alt="식신" width="132" height="132" decoding="async"></div>
+          <p class="reveal-title" id="reveal-title">✨ 식신께서 밥괘를 내려주셨다...! ✨</p>
+        </div>
+
+        <div class="menu-block">
+          <div class="menu-label">🍱 오늘의 <span id="r-meal-label"></span> 밥괘</div>
+          <p class="menu-name" id="r-menu"></p>
+          <span class="iljin" id="r-iljin"></span>
+        </div>
+
+        <div class="r-sec r-row">
+          <span class="emo" aria-hidden="true">🤔</span>
+          <div>
+            <p class="basis" id="r-basis" style="margin:0"></p>
+            <p class="reason" id="r-reason"></p>
+          </div>
+        </div>
+
+        <div class="r-sec">
+          <p class="oracle-title">📜 신탁</p>
+          <p class="oracle" id="r-oracle"></p>
+        </div>
+
+        <div class="r-sec r-row">
+          <span class="emo" id="r-rx-emoji" aria-hidden="true"></span>
+          <p class="rx"><span class="rx-chip" id="r-rx-type"></span><span id="r-message"></span></p>
+        </div>
+
+        <div class="r-sec">
+          <p class="kv">🍀 <b>행운의 반찬:</b> <span id="r-lucky"></span></p>
+          <p class="kv">🚫 <b>오늘 피해야 할 메뉴:</b> <span id="r-avoid"></span> - <span id="r-avoid-reason"></span></p>
+        </div>
+
+        <p class="sign">- 한끼액땜 -</p>
+      </section>
+
+      <!-- 공양 슬롯: 광고. 표기 라벨([광고]/[광고 예시])은 응답과 무관하게 프론트가 고정으로 붙인다 -->
+      <aside class="card offering rise rise-2 hidden" id="offering" aria-label="광고">
+        <p class="ad-head"><span class="ad-label" id="ad-label"></span><span class="ad-disclosure" id="ad-disclosure"></span></p>
+        <p class="offering-intro">🙏 오늘 식신께 공양을 올린 집이 있다는구나...</p>
+        <p class="offering-item" id="offering-item"></p>
+        <p class="offering-comment" id="offering-comment"></p>
+        <a class="offering-link hidden" id="offering-link" target="_blank" rel="noopener sponsored">가게 보러 가기 →</a>
+      </aside>
+
+      <button class="again" type="button" id="again">🔁 다시 여쭙기</button>
+    </main>
+
+    <!-- ===== 5) 푸터 (항상 노출) ===== -->
+    <footer>
+      <p>🙏 식신께 공양을 올리고 싶은 사장님은 연락 주시게 → <a href="#" id="ad-inquiry">[광고 문의]</a></p>
+      <p class="disclaimer">재미로 보는 밥괘입니다. 진짜 팔자는 맛있게 드시는 분이 정하는 법이라네.</p>
+    </footer>
+  </div>
 
   <script>
     // ===== 상수 =====
-    // 끼니 6종 (핸드오프 3장). start: KST 시작 시각(분). 서버 time_util.py와 같은 규칙
+    // 끼니 6종. start: KST 시작 시각(분). 서버 time_util.py와 같은 규칙 (야식은 22:00~04:59로 자정을 넘김)
     const MEALS = [
       { key: "breakfast",  label: "🌅 아침", start: 5 * 60 },
       { key: "brunch",     label: "🥐 아점", start: 10 * 60 },
@@ -94,7 +513,6 @@
       { key: "late_night", label: "🌃 야식", start: 22 * 60 },
     ];
 
-    // 지역별 인사 (핸드오프 2-1장, 랜덤 노출)
     const GREETINGS = [
       "마! 밥 뭇나? 한끼 잘 챙기래이~",
       "밥 드셨슈~? 잘 챙기슈~",
@@ -103,19 +521,41 @@
       "밥 먹언? 잘 챙겨 먹읍서~",
     ];
 
-    // 처방 타입별 이모지 (핸드오프 2-2장)
     const PRESCRIPTION_EMOJI = { "액땜": "🧧", "부스트": "🔥", "보양": "🍚" };
 
-    // ===== 상태 =====
-    // selectedMeal: null이면 "자동"(서버가 KST로 판별), 탭을 누르면 해당 키로 고정
-    const state = {
-      selectedMeal: null,
-      autoMeal: detectMealKST(),
-      loading: false,
+    // 캐릭터 이미지: static/img/ 의 경량 WebP (배경제거 PNG 원본을 512px로 줄인 사본). 세션마다 각 1장씩 랜덤
+    const CHAR_IMAGE_DIR = "img/";
+    const CHAR_IMAGES = {
+      doctor: [
+        "박사1_배경제거.webp",
+        "박사2_배경제거.webp",
+        "박사3_배경제거.webp",
+        "박사 상반신1_배경제거.webp",
+        "박사 상반신2_배경제거.webp",
+      ],
+      sinsin: [
+        "선녀1_배경제거.webp",
+        "선녀2_배경제거.webp",
+        "선녀3_배경제거.webp",
+        "선녀 상반신1_배경제거.webp",
+        "선녀 상반신2_배경제거.webp",
+      ],
     };
+    const CHAR_SESSION_KEY = "hankki.chars";
+
+    const GREETING_INTERVAL_MS = 3800;
+    const REQUEST_TIMEOUT_MS = 25000; // 응답은 최대 15초쯤 → 여유 있게
+
+    // ===== 상태 =====
+    // selectedMeal: null이면 "자동"(서버가 KST로 판별), 탭을 누르면 그 끼니로 고정
+    const state = { selectedMeal: null, autoMeal: detectMealKST(), loading: false };
+
+    const $ = id => document.getElementById(id);
+    const pad2 = n => String(n).padStart(2, "0");
+    const randInt = n => Math.floor(Math.random() * n);
 
     // ===== 유틸 =====
-    /** 브라우저 시간대와 무관하게 KST 시/분을 구해 끼니를 판별 (탭 초기 표시용. 최종 판별은 서버) */
+    /** 브라우저 시간대와 무관하게 KST(Asia/Seoul) 시/분으로 끼니 판별 (탭 초기 표시용. 최종 판별은 서버) */
     function detectMealKST() {
       const parts = new Intl.DateTimeFormat("en-GB", {
         timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
@@ -123,147 +563,220 @@
       const h = Number(parts.find(p => p.type === "hour").value);
       const m = Number(parts.find(p => p.type === "minute").value);
       const minutes = h * 60 + m;
-      // 야식은 자정을 넘김: 22:00 이후 또는 05:00 이전
       if (minutes >= MEALS[5].start || minutes < MEALS[0].start) return "late_night";
       let current = MEALS[0].key;
       for (const meal of MEALS.slice(0, 5)) if (minutes >= meal.start) current = meal.key;
       return current;
     }
 
-    /** 숫자를 2자리 문자열로 */
-    const pad2 = n => String(n).padStart(2, "0");
+    /** 세션 동안 고정되는 캐릭터 선택. sessionStorage가 막혀 있어도 랜덤으로 동작 */
+    function pickCharacters() {
+      const fresh = { doctor: randInt(CHAR_IMAGES.doctor.length), sinsin: randInt(CHAR_IMAGES.sinsin.length) };
+      try {
+        const saved = JSON.parse(sessionStorage.getItem(CHAR_SESSION_KEY) || "null");
+        if (saved && CHAR_IMAGES.doctor[saved.doctor] && CHAR_IMAGES.sinsin[saved.sinsin]) return saved;
+        sessionStorage.setItem(CHAR_SESSION_KEY, JSON.stringify(fresh));
+      } catch (_) { /* 프라이빗 모드 등: 저장 없이 진행 */ }
+      return fresh;
+    }
+
+    function applyCharacters() {
+      const pick = pickCharacters();
+      for (const img of document.querySelectorAll("img[data-char]")) {
+        const kind = img.dataset.char;
+        img.onerror = () => { img.style.visibility = "hidden"; };
+        img.src = CHAR_IMAGE_DIR + encodeURIComponent(CHAR_IMAGES[kind][pick[kind]]);
+      }
+    }
+
+    /** 지역별 인사: 랜덤 시작 + 일정 간격으로 순환 (모션 최소화 설정이면 고정) */
+    function startGreetings() {
+      const el = $("greeting");
+      let i = randInt(GREETINGS.length);
+      const show = () => { el.textContent = GREETINGS[i]; $("greeting-sr").textContent = GREETINGS[i]; };
+      show();
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+      setInterval(() => {
+        if (document.hidden) return;
+        el.classList.add("out");
+        setTimeout(() => { i = (i + 1) % GREETINGS.length; show(); el.classList.remove("out"); }, 350);
+      }, GREETING_INTERVAL_MS);
+    }
 
     // ===== 렌더링 =====
-    /** 끼니 탭 렌더링: 수동 선택이 있으면 그것, 없으면 자동 끼니를 활성 표시 */
     function renderMealTabs() {
       const active = state.selectedMeal || state.autoMeal;
-      const tabs = document.getElementById("meal-tabs");
-      tabs.innerHTML = "";
-      for (const meal of MEALS) {
+      const tabs = $("meal-tabs");
+      tabs.replaceChildren(...MEALS.map(meal => {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.textContent = meal.label;
-        btn.className = meal.key === active ? "active" : "";
+        btn.setAttribute("aria-pressed", String(meal.key === active));
         btn.onclick = () => { state.selectedMeal = meal.key; renderMealTabs(); };
-        tabs.appendChild(btn);
-      }
-      document.getElementById("meal-hint").textContent = state.selectedMeal ? "(직접 선택)" : "(지금 시각 기준 자동)";
+        return btn;
+      }));
+      $("meal-hint").textContent = state.selectedMeal ? "직접 고르셨구먼" : "지금 시각(한국) 기준으로 골라뒀네";
     }
 
-    /** 결과 렌더링 (2-2장 템플릿). textContent만 사용해 LLM 출력이 HTML로 해석되지 않게 함 */
+    function setText(id, value) { $(id).textContent = value == null ? "" : String(value); }
+
+    /** 결과 렌더링. 모든 응답 문자열은 textContent로만 */
     function renderResult(data) {
       const r = data.result;
-      const emoji = PRESCRIPTION_EMOJI[data.prescription_type] || "🍚";
-      const lines = [
-        "✨ 식신께서 밥괘를 내려주셨다...! ✨",
-        "",
-        `🍱 오늘의 ${data.meal_label} 밥괘: ${r.menu}`,
-        "",
-        `🤔 ${r.basis_comment}`,
-        `   ${r.ohaeng_reason}`,
-        "",
-        "📜 신탁",
-        r.oracle,
-        "",
-        `${emoji} [${data.prescription_type}] ${r.message}`,
-        "",
-        `🍀 행운의 반찬: ${r.lucky_side_dish}`,
-        `🚫 오늘 피해야 할 메뉴: ${r.avoid_menu} - ${r.avoid_reason}`,
-        "",
-        `(오늘 일진 ${data.today_iljin} · 나의 일간 ${data.my_ilgan}(${data.my_ohaeng}))`,
-        "- 한끼액땜 -",
-      ];
-      const section = document.getElementById("result");
-      section.textContent = lines.join("\n");
-      section.classList.remove("hidden");
+      setText("r-meal-label", data.meal_label);
+      setText("r-menu", r.menu);
+      setText("r-iljin", `오늘 일진 ${data.today_iljin} · 나의 일간 ${data.my_ilgan}(${data.my_ohaeng})`);
+      setText("r-basis", r.basis_comment);
+      setText("r-reason", r.ohaeng_reason);
+      setText("r-oracle", r.oracle);
+      setText("r-rx-emoji", PRESCRIPTION_EMOJI[data.prescription_type] || "🍚");
+      setText("r-rx-type", data.prescription_type);
+      $("r-rx-type").classList.toggle("hidden", !data.prescription_type);
+      setText("r-message", r.message);
+      setText("r-lucky", r.lucky_side_dish);
+      setText("r-avoid", r.avoid_menu);
+      setText("r-avoid-reason", r.avoid_reason);
       renderOffering(data.offering);
     }
 
-    /**
-     * 공양 슬롯 렌더링 (offering이 null이면 숨김)
-     * - 표기 라벨: is_demo면 "[광고 예시]", 아니면 "[광고]" — 응답과 무관하게 프론트가 고정으로 붙인다
-     * - 모든 문자열은 textContent로만 넣는다
-     */
+    /** 공양 슬롯. offering이 null이면 카드 자체를 숨김 */
     function renderOffering(offering) {
-      const section = document.getElementById("offering");
-      if (!offering) { section.classList.add("hidden"); return; }
+      const card = $("offering");
+      if (!offering) { card.classList.add("hidden"); return; }
 
-      document.getElementById("ad-label").textContent = offering.is_demo ? "[광고 예시]" : "[광고]";
-      document.getElementById("ad-disclosure").textContent = offering.disclosure;
-      document.getElementById("offering-body").textContent = [
-        "🙏 오늘 식신께 공양을 올린 집이 있다는구나...",
-        "",
-        `   ${offering.sponsor_name}의 ${offering.menu}`,
-        `   "${offering.comment}"`,
-      ].join("\n");
+      setText("ad-label", offering.is_demo ? "[광고 예시]" : "[광고]");
+      setText("ad-disclosure", offering.disclosure);
+      setText("offering-item", `${offering.sponsor_name}의 ${offering.menu}`);
+      setText("offering-comment", `"${offering.comment}"`);
 
-      const link = document.getElementById("offering-link");
-      if (offering.link) { link.href = offering.link; link.classList.remove("hidden"); }
+      const link = $("offering-link");
+      // 링크는 http(s)만 허용 (javascript: 등 차단)
+      if (/^https?:\/\//i.test(offering.link || "")) { link.href = offering.link; link.classList.remove("hidden"); }
       else { link.removeAttribute("href"); link.classList.add("hidden"); }
 
-      section.classList.remove("hidden");
+      card.classList.remove("hidden");
     }
 
-    // ===== 이벤트 =====
-    /** 양력/음력 전환 시 윤달 토글 노출 여부 변경 */
+    function showView(name) {
+      $("view-ask").classList.toggle("hidden", name !== "ask");
+      $("view-result").classList.toggle("hidden", name !== "result");
+      window.scrollTo({ top: 0, behavior: "auto" });
+    }
+
+    function hideResult() {
+      $("view-result").classList.add("hidden");
+      $("offering").classList.add("hidden");
+    }
+
+    function setLoading(on) {
+      state.loading = on;
+      const btn = $("submit");
+      btn.disabled = on;
+      btn.textContent = on ? "🔮 식신께서 점지 중..." : "🔮 식신께 밥괘 여쭙기";
+      $("loading").classList.toggle("hidden", !on);
+    }
+
+    // ===== 입력 =====
+    /** 숫자만 남기기 */
+    for (const id of ["year", "month", "day"]) {
+      $(id).addEventListener("input", e => {
+        const el = e.target;
+        const digits = el.value.replace(/\D/g, "");
+        if (digits !== el.value) el.value = digits;
+        el.removeAttribute("aria-invalid");
+        // 연도 4자리를 다 채우면 월 칸으로 (월/일은 1~2자리라 자동 이동하지 않음)
+        if (id === "year" && digits.length === 4 && e.inputType === "insertText") $("month").focus();
+      });
+    }
+
+    /** 간단한 범위 확인 (실제 날짜 유효성은 양력/음력에 맞춰 서버가 검사) */
+    function readBirth() {
+      const y = $("year").value, m = $("month").value, d = $("day").value;
+      const bad = [];
+      if (!/^\d{4}$/.test(y) || +y < 1900 || +y > 2100) bad.push("year");
+      if (!/^\d{1,2}$/.test(m) || +m < 1 || +m > 12) bad.push("month");
+      if (!/^\d{1,2}$/.test(d) || +d < 1 || +d > 31) bad.push("day");
+      for (const id of ["year", "month", "day"]) {
+        if (bad.includes(id)) $(id).setAttribute("aria-invalid", "true");
+        else $(id).removeAttribute("aria-invalid");
+      }
+      if (bad.length) { $(bad[0]).focus(); return null; }
+      return `${y}-${pad2(+m)}-${pad2(+d)}`;
+    }
+
     for (const radio of document.querySelectorAll('input[name="calendar"]')) {
-      radio.onchange = () => {
+      radio.addEventListener("change", () => {
         const isLunar = document.querySelector('input[name="calendar"]:checked').value === "lunar";
-        document.getElementById("leap-wrap").classList.toggle("hidden", !isLunar);
-        if (!isLunar) document.getElementById("leap").checked = false;
-      };
+        $("leap-wrap").classList.toggle("hidden", !isLunar);
+        if (!isLunar) $("leap").checked = false;
+      });
     }
 
-    /** 제출: API 호출 → 결과 렌더링 */
-    document.getElementById("form").onsubmit = async (e) => {
+    // ===== 제출 =====
+    $("form").addEventListener("submit", async e => {
       e.preventDefault();
       if (state.loading) return;
 
-      const errorEl = document.getElementById("error");
-      const submitBtn = document.getElementById("submit");
+      const errorEl = $("error");
       errorEl.textContent = "";
+
+      const birthDate = readBirth();
+      if (!birthDate) { errorEl.textContent = "생년월일을 바르게 적어 주시게 (예: 1995년 3월 15일)"; return; }
 
       const calendar = document.querySelector('input[name="calendar"]:checked').value;
       const body = {
-        birth_date: `${document.getElementById("year").value}-${pad2(document.getElementById("month").value)}-${pad2(document.getElementById("day").value)}`,
+        birth_date: birthDate,
         calendar,
-        is_leap_month: calendar === "lunar" && document.getElementById("leap").checked,
-        meal: state.selectedMeal, // null이면 서버가 KST로 자동 판별
+        is_leap_month: calendar === "lunar" && $("leap").checked,
+        meal: state.selectedMeal, // null이면 서버가 KST로 판별
       };
 
-      state.loading = true;
-      submitBtn.disabled = true;
-      submitBtn.textContent = "🔮 식신께서 점지 중...";
+      setLoading(true);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
       try {
         const res = await fetch("/api/bapgwae", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
+          signal: controller.signal,
         });
-        const data = await res.json();
-        if (!res.ok) {
-          // 이전 결과가 남아 있으면 오류와 헷갈리므로 숨김
-          document.getElementById("result").classList.add("hidden");
-          document.getElementById("offering").classList.add("hidden");
-          // 400: 서버 날짜 검증 메시지(문자열), 422: 형식 오류(배열)
-          errorEl.textContent = typeof data.detail === "string" ? data.detail : "생년월일 형식을 확인해 주시게";
+        let data = null;
+        try { data = await res.json(); } catch (_) { /* 본문이 JSON이 아님 */ }
+
+        if (!res.ok || !data || !data.result) {
+          hideResult(); // 오류와 헷갈리지 않게 이전 결과/공양 슬롯 숨김
+          if (res.status === 422) errorEl.textContent = "생년월일 형식을 확인해 주시게";
+          else if (data && typeof data.detail === "string") errorEl.textContent = data.detail;
+          else errorEl.textContent = "식신과 연결이 끊겼다네... 잠시 후 다시 여쭈시게";
           return;
         }
-        // 서버가 판별한 끼니로 탭 표시 동기화 (자동 모드일 때)
-        if (!state.selectedMeal) { state.autoMeal = data.meal; renderMealTabs(); }
+
+        // 자동 모드였다면 서버가 판별한 끼니로 탭 표시 맞춤
+        if (!state.selectedMeal && data.meal) { state.autoMeal = data.meal; renderMealTabs(); }
         renderResult(data);
+        showView("result");
+        $("result").focus({ preventScroll: true });
       } catch (err) {
+        hideResult();
         errorEl.textContent = "식신과 연결이 끊겼다네... 잠시 후 다시 여쭈시게";
         console.error(err);
       } finally {
-        state.loading = false;
-        submitBtn.disabled = false;
-        submitBtn.textContent = "🔮 식신께 밥괘 여쭙기";
+        clearTimeout(timer);
+        setLoading(false);
       }
-    };
+    });
+
+    $("again").addEventListener("click", () => {
+      hideResult();
+      if (!state.selectedMeal) { state.autoMeal = detectMealKST(); renderMealTabs(); }
+      showView("ask");
+      $("submit").focus({ preventScroll: true });
+    });
 
     // ===== 초기화 =====
-    document.getElementById("greeting").textContent = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
+    applyCharacters();
+    startGreetings();
     renderMealTabs();
   </script>
 </body>
